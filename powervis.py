@@ -30,6 +30,12 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+def parse_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() == "true"
+
+
 def is_minute_in_window(minute: int, start_min: int, end_min: int) -> bool:
     if start_min == end_min:
         return False
@@ -155,6 +161,22 @@ class FreeRule:
 
 
 @dataclass
+class CustomPeriod:
+    name: str = "Period"
+    duration: float = 7.0
+    unit: str = "days"
+    enabled: bool = True
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "duration": self.duration,
+            "unit": self.unit,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass
 class SettingsModel:
     currency_symbol: str = "£"
     month_days: int = 30
@@ -225,22 +247,37 @@ class SettingsModel:
 @dataclass
 class Project:
     devices: List[Device] = field(default_factory=list)
-    custom_periods: List[Tuple[str, float]] = field(default_factory=lambda: [("Lettuce", 45.0)])
+    custom_periods: List["CustomPeriod"] = field(default_factory=lambda: [
+        CustomPeriod(name="Lettuce", duration=45.0, unit="days", enabled=True)
+    ])
 
     def to_dict(self) -> dict:
         return {
             "devices": [d.to_dict() for d in self.devices],
-            "custom_periods": [{"name": n, "days": days} for (n, days) in self.custom_periods],
+            "custom_periods": [cp.to_dict() for cp in self.custom_periods],
         }
 
     @staticmethod
     def from_dict(d: dict) -> "Project":
         p = Project()
         p.devices = [Device.from_dict(x) for x in d.get("devices", [])]
-        cps = []
+        cps: List[CustomPeriod] = []
         for item in d.get("custom_periods", []):
             try:
-                cps.append((item.get("name", "Period"), float(item.get("days", 1.0))))
+                if "days" in item and "duration" not in item:
+                    cps.append(CustomPeriod(
+                        name=item.get("name", "Period"),
+                        duration=float(item.get("days", 1.0)),
+                        unit="days",
+                        enabled=parse_bool(item.get("enabled", True)),
+                    ))
+                else:
+                    cps.append(CustomPeriod(
+                        name=item.get("name", "Period"),
+                        duration=float(item.get("duration", 1.0)),
+                        unit=item.get("unit", "days"),
+                        enabled=parse_bool(item.get("enabled", True)),
+                    ))
             except Exception:
                 pass
         if cps:
@@ -385,6 +422,21 @@ def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
     )
 
 
+def custom_period_to_days(period: CustomPeriod, settings: SettingsModel) -> float:
+    duration = float(period.duration)
+    if period.unit == "mins":
+        return duration / (60.0 * 24.0)
+    if period.unit == "hours":
+        return duration / 24.0
+    if period.unit == "days":
+        return duration
+    if period.unit == "months":
+        return duration * settings.month_days
+    if period.unit == "years":
+        return duration * 365.0
+    return duration
+
+
 # =========================
 # Settings dialog
 # =========================
@@ -500,6 +552,142 @@ class SettingsDialog(QDialog):
         ).normalized()
         m.free_rule = fr
         return m
+
+
+# =========================
+# Custom periods dialog
+# =========================
+
+CUSTOM_PERIOD_UNITS: List[Tuple[str, str]] = [
+    ("mins", "Mins"),
+    ("hours", "Hours"),
+    ("days", "Days"),
+    ("months", "Months"),
+    ("years", "Years"),
+]
+
+
+class CustomPeriodsDialog(QDialog):
+    def __init__(self, parent=None, periods: Optional[List[CustomPeriod]] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Custom Periods")
+        self.setModal(True)
+        self._periods = [
+            CustomPeriod(
+                name=cp.name,
+                duration=cp.duration,
+                unit=cp.unit,
+                enabled=cp.enabled,
+            )
+            for cp in (periods or [])
+        ]
+
+        layout = QVBoxLayout(self)
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Enabled", "Name", "Duration", "Unit"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed | QTableWidget.SelectedClicked)
+        layout.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        self.btn_add_period = QPushButton("Add period")
+        self.btn_del_period = QPushButton("Delete selected")
+        btn_row.addWidget(self.btn_add_period)
+        btn_row.addWidget(self.btn_del_period)
+        layout.addLayout(btn_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.table.itemChanged.connect(self._on_item_changed)
+        self.btn_add_period.clicked.connect(self._add_period)
+        self.btn_del_period.clicked.connect(self._remove_selected)
+
+        self._refresh_table()
+
+    def _refresh_table(self):
+        self.table.blockSignals(True)
+        self.table.setRowCount(len(self._periods))
+        for row, period in enumerate(self._periods):
+            enabled_item = QTableWidgetItem("")
+            enabled_item.setFlags(enabled_item.flags() | Qt.ItemIsUserCheckable)
+            enabled_item.setFlags(enabled_item.flags() & ~Qt.ItemIsEditable)
+            enabled_item.setCheckState(Qt.Checked if period.enabled else Qt.Unchecked)
+            self.table.setItem(row, 0, enabled_item)
+
+            name_item = QTableWidgetItem(period.name)
+            self.table.setItem(row, 1, name_item)
+
+            duration_item = QTableWidgetItem(f"{period.duration:g}")
+            self.table.setItem(row, 2, duration_item)
+
+            unit_box = QComboBox()
+            for value, label in CUSTOM_PERIOD_UNITS:
+                unit_box.addItem(label, value)
+            unit_index = next(
+                (i for i, (value, _label) in enumerate(CUSTOM_PERIOD_UNITS) if value == period.unit),
+                2,
+            )
+            unit_box.setCurrentIndex(unit_index)
+            unit_box.currentIndexChanged.connect(lambda _idx, r=row: self._on_unit_changed(r))
+            self.table.setCellWidget(row, 3, unit_box)
+        self.table.blockSignals(False)
+
+    def _on_item_changed(self, item: QTableWidgetItem):
+        row, col = item.row(), item.column()
+        if not (0 <= row < len(self._periods)):
+            return
+        period = self._periods[row]
+        if col == 0:
+            period.enabled = (item.checkState() == Qt.Checked)
+        elif col == 1:
+            period.name = item.text().strip() or period.name
+        elif col == 2:
+            try:
+                period.duration = max(0.0, float(item.text()))
+            except Exception:
+                self.table.blockSignals(True)
+                item.setText(f"{period.duration:g}")
+                self.table.blockSignals(False)
+
+    def _on_unit_changed(self, row: int):
+        if not (0 <= row < len(self._periods)):
+            return
+        box: QComboBox = self.table.cellWidget(row, 3)
+        self._periods[row].unit = box.currentData()
+
+    def _add_period(self):
+        self._periods.append(CustomPeriod(name="Period", duration=7.0, unit="days", enabled=True))
+        self._refresh_table()
+        self.table.selectRow(len(self._periods) - 1)
+
+    def _remove_selected(self):
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        if not rows:
+            return
+        for row in rows:
+            if 0 <= row < len(self._periods):
+                self._periods.pop(row)
+        self._refresh_table()
+
+    def get_periods(self) -> List[CustomPeriod]:
+        return [
+            CustomPeriod(
+                name=cp.name,
+                duration=cp.duration,
+                unit=cp.unit,
+                enabled=cp.enabled,
+            )
+            for cp in self._periods
+        ]
 
 
 # =========================
@@ -1211,7 +1399,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         root_layout.addWidget(splitter)
 
-        # left panel: device table + controls + custom periods
+        # left panel: device table + controls
         left = QWidget()
         left_layout = QVBoxLayout(left)
 
@@ -1232,22 +1420,6 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self.btn_add)
         btn_row.addWidget(self.btn_del)
         left_layout.addLayout(btn_row)
-
-        left_layout.addWidget(QLabel("Custom periods (days)"))
-
-        self.period_list = QTableWidget(0, 2)
-        self.period_list.setHorizontalHeaderLabels(["Name", "Days"])
-        self.period_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.period_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.period_list.verticalHeader().setVisible(False)
-        left_layout.addWidget(self.period_list)
-
-        pr_btn = QHBoxLayout()
-        self.btn_add_period = QPushButton("Add period")
-        self.btn_del_period = QPushButton("Remove period")
-        pr_btn.addWidget(self.btn_add_period)
-        pr_btn.addWidget(self.btn_del_period)
-        left_layout.addLayout(pr_btn)
 
         splitter.addWidget(left)
 
@@ -1274,11 +1446,7 @@ class MainWindow(QMainWindow):
         # wire signals
         self.btn_add.clicked.connect(self.add_device)
         self.btn_del.clicked.connect(self.remove_device)
-        self.btn_add_period.clicked.connect(self.add_period)
-        self.btn_del_period.clicked.connect(self.remove_period)
-
         self.device_table.itemChanged.connect(self.on_device_table_changed)
-        self.period_list.itemChanged.connect(self.on_periods_changed)
 
         # first run -> show settings
         if not SettingsModel.has_run_before(self.qs):
@@ -1310,6 +1478,11 @@ class MainWindow(QMainWindow):
         act_settings = QAction("Settings…", self)
         editm.addAction(act_settings)
         act_settings.triggered.connect(self.open_settings)
+
+        timingm = mb.addMenu("&Timing")
+        act_custom_periods = QAction("Custom Periods…", self)
+        timingm.addAction(act_custom_periods)
+        act_custom_periods.triggered.connect(self.open_custom_periods)
 
         helpm = mb.addMenu("&Help")
         act_about = QAction("About", self)
@@ -1385,6 +1558,12 @@ class MainWindow(QMainWindow):
             # even if they cancel on first run, write defaults so it doesn't pop every time
             self.settings_model.to_qsettings(self.qs)
 
+    def open_custom_periods(self):
+        dlg = CustomPeriodsDialog(self, self.project.custom_periods)
+        if dlg.exec() == QDialog.Accepted:
+            self.project.custom_periods = dlg.get_periods()
+            self.recompute()
+
     # ---------------------
     # Tables <-> model sync
     # ---------------------
@@ -1408,14 +1587,6 @@ class MainWindow(QMainWindow):
 
         self.device_table.blockSignals(False)
 
-        # periods
-        self.period_list.blockSignals(True)
-        self.period_list.setRowCount(len(self.project.custom_periods))
-        for r, (name, days) in enumerate(self.project.custom_periods):
-            self.period_list.setItem(r, 0, QTableWidgetItem(name))
-            self.period_list.setItem(r, 1, QTableWidgetItem(f"{days:g}"))
-        self.period_list.blockSignals(False)
-
     def _on_device_type_changed(self, row: int):
         if not (0 <= row < len(self.project.devices)):
             return
@@ -1438,21 +1609,6 @@ class MainWindow(QMainWindow):
             pass
         self.recompute()
 
-    def on_periods_changed(self, item: QTableWidgetItem):
-        r, c = item.row(), item.column()
-        if not (0 <= r < len(self.project.custom_periods)):
-            return
-        name, days = self.project.custom_periods[r]
-        try:
-            if c == 0:
-                name = item.text().strip() or name
-            elif c == 1:
-                days = float(item.text())
-        except Exception:
-            pass
-        self.project.custom_periods[r] = (name, days)
-        self.recompute()
-
     # ---------------------
     # Buttons
     # ---------------------
@@ -1469,21 +1625,6 @@ class MainWindow(QMainWindow):
         for r in rows:
             if 0 <= r < len(self.project.devices):
                 self.project.devices.pop(r)
-        self.refresh_tables()
-        self.recompute()
-
-    def add_period(self):
-        self.project.custom_periods.append(("Period", 7.0))
-        self.refresh_tables()
-        self.recompute()
-
-    def remove_period(self):
-        rows = sorted({i.row() for i in self.period_list.selectedItems()}, reverse=True)
-        if not rows:
-            return
-        for r in rows:
-            if 0 <= r < len(self.project.custom_periods):
-                self.project.custom_periods.pop(r)
         self.refresh_tables()
         self.recompute()
 
@@ -1518,12 +1659,18 @@ class MainWindow(QMainWindow):
         lines.append(f"Year (365d): {year_kwh:.3f} kWh  |   {cs}{year_cost:.2f}")
         lines.append("")
         lines.append("Custom periods:")
-        for name, days in self.project.custom_periods:
+        enabled_periods = [cp for cp in self.project.custom_periods if cp.enabled]
+        if not enabled_periods:
+            lines.append("• (none enabled)")
+        for period in enabled_periods:
             try:
-                d = float(days)
+                d = custom_period_to_days(period, self.settings_model)
             except Exception:
                 d = 1.0
-            lines.append(f"• {name} ({d:g} days): {day_kwh*d:.3f} kWh | {cs}{day_cost*d:.2f}")
+            lines.append(
+                f"• {period.name} ({period.duration:g} {period.unit}): "
+                f"{day_kwh*d:.3f} kWh | {cs}{day_cost*d:.2f}"
+            )
 
         self.summary.setText("\n".join(lines))
 
