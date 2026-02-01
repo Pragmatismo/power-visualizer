@@ -1,5 +1,6 @@
 import copy
 import json
+from html import escape
 import math
 import os
 import re
@@ -2625,7 +2626,9 @@ class MainWindow(QMainWindow):
 
         self.summary = QLabel("")
         self.summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.summary.setStyleSheet("QLabel { padding: 8px; background: #1e1e22; color: #e8e8ee; }")
+        self.summary.setStyleSheet(
+            "QLabel { padding: 8px; background: #1e1e22; color: #e8e8ee; font-size: 14px; }"
+        )
         root_layout.addWidget(self.summary, stretch=0)
 
         # menu
@@ -2849,28 +2852,49 @@ class MainWindow(QMainWindow):
         year_kwh = day_kwh * 365
         year_cost = day_cost * 365
 
-        lines = []
-        lines.append(f"TOTAL (from timeline + tariff)")
-        lines.append(f"Day:   {day_kwh:.3f} kWh   |   {cs}{day_cost:.2f}")
-        lines.append(f"Week:  {week_kwh:.3f} kWh  |   {cs}{week_cost:.2f}")
-        lines.append(f"Month (30d): {month_kwh:.3f} kWh  |   {cs}{month_cost:.2f}")
-        lines.append(f"Year (365d): {year_kwh:.3f} kWh  |   {cs}{year_cost:.2f}")
-        lines.append("")
-        lines.append("Custom periods:")
+        rows = []
+
+        def add_row(label: str, kwh: str, cost: str) -> None:
+            rows.append(
+                "<tr>"
+                f"<td style='padding-right: 18px; white-space: nowrap;'>{escape(label)}</td>"
+                f"<td style='padding-right: 18px; text-align: right; white-space: nowrap;'>{escape(kwh)}</td>"
+                f"<td style='text-align: right; white-space: nowrap;'>{escape(cost)}</td>"
+                "</tr>"
+            )
+
+        add_row("Day", f"{day_kwh:.3f} kWh", f"{cs}{day_cost:.2f}")
+        add_row("Week", f"{week_kwh:.3f} kWh", f"{cs}{week_cost:.2f}")
+        add_row("Month", f"{month_kwh:.3f} kWh", f"{cs}{month_cost:.2f}")
+        add_row("Year", f"{year_kwh:.3f} kWh", f"{cs}{year_cost:.2f}")
+        rows.append("<tr><td colspan='3' style='height: 8px;'></td></tr>")
+
         enabled_periods = [cp for cp in self.project.custom_periods if cp.enabled]
         if not enabled_periods:
-            lines.append("• (none enabled)")
+            rows.append(
+                "<tr>"
+                "<td colspan='3' style='color: #b6b6bf; padding-left: 2px;'>"
+                "No custom periods enabled"
+                "</td>"
+                "</tr>"
+            )
         for period in enabled_periods:
             try:
                 d = custom_period_to_days(period, self.settings_model)
             except Exception:
                 d = 1.0
-            lines.append(
-                f"• {period.name} ({period.duration:g} {period.unit}): "
-                f"{day_kwh*d:.3f} kWh | {cs}{day_cost*d:.2f}"
+            add_row(
+                f"{period.name} ({period.duration:g} {period.unit})",
+                f"{day_kwh*d:.3f} kWh",
+                f"{cs}{day_cost*d:.2f}",
             )
 
-        self.summary.setText("\n".join(lines))
+        html = (
+            "<table style='width: 100%; border-collapse: collapse;'>"
+            + "".join(rows)
+            + "</table>"
+        )
+        self.summary.setText(html)
 
 
 # =========================
