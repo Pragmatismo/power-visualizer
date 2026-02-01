@@ -1122,7 +1122,7 @@ class TimelineWidget(QWidget):
         # layout constants
         self.left_label_w = 220
         self.right_info_w = 240
-        self.top_tariff_h = 28
+        self.top_tariff_h = 56
         self.row_h = 44
         self.row_gap = 6
         self.axis_h = 22
@@ -1138,6 +1138,7 @@ class TimelineWidget(QWidget):
 
         # appearance
         self.font = QFont("Sans", 9)
+        self.tariff_font = QFont("Sans", 15)
         self.name_font = QFont("Sans", 10, QFont.DemiBold)
         self.power_font = QFont("Sans", 9)
         self.setMinimumHeight(400)
@@ -1238,7 +1239,7 @@ class TimelineWidget(QWidget):
     def _paint_tariff(self, p: QPainter):
         tr = self._tariff_rect()
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(40, 40, 46))
+        p.setBrush(QColor(12, 20, 40))
         p.drawRect(tr)
 
         # base rate visualization
@@ -1248,8 +1249,12 @@ class TimelineWidget(QWidget):
             r = tariff_rate_for_minute(self.settings, m0)
             # map rate to brightness (simple)
             # bigger rate -> brighter
-            base = clamp(int(60 + 400 * r), 60, 220)
-            col = QColor(base, base, base)
+            base = clamp(int(40 + 180 * r), 40, 200)
+            col = QColor(
+                clamp(15 + int(40 * r), 15, 80),
+                clamp(30 + int(60 * r), 30, 120),
+                clamp(90 + base, 90, 220),
+            )
             x0 = self._minute_to_x(m0)
             x1 = self._minute_to_x(m1)
             p.setBrush(col)
@@ -1262,8 +1267,9 @@ class TimelineWidget(QWidget):
             if x1 - x0 < 40:
                 continue
             label_rect = QRect(x0 + 4, tr.top(), x1 - x0 - 8, tr.height())
-            p.setPen(QColor(240, 240, 240))
-            p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, segment_label.format(rate=rate))
+            p.setFont(self.tariff_font)
+            p.setPen(QColor(230, 235, 245))
+            p.drawText(label_rect, Qt.AlignCenter, segment_label.format(rate=rate))
 
         # free overlay
         fr = self.settings.free_rule.normalized()
@@ -1273,7 +1279,8 @@ class TimelineWidget(QWidget):
             overlay = QColor(80, 160, 80, 140)
             p.setBrush(overlay)
             p.drawRect(QRect(x0, tr.top(), x1 - x0, tr.height()))
-            p.setPen(QColor(240, 240, 240))
+            p.setFont(self.tariff_font)
+            p.setPen(QColor(230, 235, 245))
             p.drawText(QRect(x0, tr.top(), x1 - x0, tr.height()), Qt.AlignCenter,
                        f"FREE ≤ {fr.free_kw_threshold:.1f} kW")
 
@@ -1281,9 +1288,12 @@ class TimelineWidget(QWidget):
         p.setPen(QPen(QColor(120, 120, 130), 1))
         p.setBrush(Qt.NoBrush)
         p.drawRect(tr)
-        p.setPen(QColor(220, 220, 230))
-        label_rect = QRect(tr.right() + 8, tr.top(), self.right_info_w - 16, tr.height())
-        p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, "Tariff")
+        p.setFont(self.tariff_font)
+        p.setPen(QColor(230, 235, 245))
+        label_width = self.left_label_w - self.label_pad * 2
+        label_right = tr.left() - 4
+        label_rect = QRect(label_right - label_width, tr.top(), label_width, tr.height())
+        p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignRight, "Tariff")
 
     def _paint_axis(self, p: QPainter):
         tl = self._timeline_rect()
