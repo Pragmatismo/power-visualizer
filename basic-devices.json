@@ -1,0 +1,734 @@
+{
+"Kitchen": [
+{
+"name": "Kettle",
+"power_w": 3000,
+"usage_duration": "0:03",
+"variable_time": false
+},
+{
+"name": "Toaster (2-slice)",
+"power_w": 900,
+"usage_duration": "0:03",
+"variable_time": false
+},
+{
+"name": "Toaster (4-slice)",
+"power_w": 2000,
+"usage_duration": "0:05",
+"variable_time": false
+},
+{
+"name": "Microwave",
+"power_w": 1500,
+"usage_duration": "0:10",
+"variable_time": false
+},
+{
+"name": "Dishwasher (compact)",
+"power_w": 2200,
+"usage_duration": "1:30",
+"variable_time": false
+},
+{
+"name": "Dishwasher (full-size)",
+"power_w": 2200,
+"usage_duration": "2:15",
+"variable_time": false
+},
+{
+"name": "Fridge freezer",
+"power_w": 150,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Mini fridge",
+"power_w": 100,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "American fridge freezer",
+"power_w": 250,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Electric oven",
+"power_w": 3000,
+"usage_duration": "1:30",
+"variable_time": true
+},
+{
+"name": "Induction hob",
+"power_w": 2000,
+"usage_duration": "0:30",
+"variable_time": true
+},
+{
+"name": "Slow cooker",
+"power_w": 200,
+"usage_duration": "8:00",
+"variable_time": false
+},
+{
+"name": "Air fryer (single basket)",
+"power_w": 1500,
+"usage_duration": "0:20",
+"variable_time": false
+},
+{
+"name": "Air fryer (dual basket)",
+"power_w": 2600,
+"usage_duration": "0:20",
+"variable_time": false
+},
+{
+"name": "Coffee machine",
+"power_w": 1000,
+"usage_duration": "0:10",
+"variable_time": false
+},
+{
+"name": "Espresso machine",
+"power_w": 1500,
+"usage_duration": "0:07",
+"variable_time": false
+},
+{
+"name": "Blender",
+"power_w": 300,
+"usage_duration": "0:05",
+"variable_time": false
+},
+{
+"name": "Stand mixer",
+"power_w": 300,
+"usage_duration": "0:10",
+"variable_time": false
+},
+{
+"name": "Rice cooker",
+"power_w": 700,
+"usage_duration": "0:45",
+"variable_time": false
+},
+{
+"name": "Electric grill",
+"power_w": 1500,
+"usage_duration": "0:15",
+"variable_time": false
+},
+{
+"name": "Bread maker",
+"power_w": 700,
+"usage_duration": "3:00",
+"variable_time": false
+}
+],
+"Laundry": [
+{
+"name": "Washing machine (standard)",
+"power_w": 2200,
+"usage_duration": "1:00",
+"variable_time": false
+},
+{
+"name": "Washing machine (quick wash)",
+"power_w": 2200,
+"usage_duration": "0:45",
+"variable_time": false
+},
+{
+"name": "Tumble dryer (vented)",
+"power_w": 2500,
+"usage_duration": "1:00",
+"variable_time": false
+},
+{
+"name": "Tumble dryer (heat pump)",
+"power_w": 800,
+"usage_duration": "1:30",
+"variable_time": false
+},
+{
+"name": "Washer dryer combo",
+"power_w": 2000,
+"usage_duration": "2:30",
+"variable_time": false
+},
+{
+"name": "Iron",
+"power_w": 3000,
+"usage_duration": "0:30",
+"variable_time": true
+},
+{
+"name": "Clothes steamer",
+"power_w": 1500,
+"usage_duration": "0:10",
+"variable_time": false
+},
+{
+"name": "Spin dryer",
+"power_w": 250,
+"usage_duration": "0:10",
+"variable_time": false
+}
+],
+"Entertainment": [
+{
+"name": "LED TV (32 inch)",
+"power_w": 40,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "LED TV (55 inch)",
+"power_w": 100,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "LED TV (65 inch)",
+"power_w": 120,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Games console",
+"power_w": 200,
+"usage_duration": "3:00",
+"variable_time": true
+},
+{
+"name": "Streaming box",
+"power_w": 30,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Blu-ray/DVD player",
+"power_w": 30,
+"usage_duration": "2:00",
+"variable_time": true
+},
+{
+"name": "AV receiver",
+"power_w": 100,
+"usage_duration": "3:00",
+"variable_time": true
+},
+{
+"name": "Smart speaker",
+"power_w": 5,
+"usage_duration": "6:00",
+"variable_time": true
+},
+{
+"name": "Soundbar",
+"power_w": 50,
+"usage_duration": "3:00",
+"variable_time": true
+},
+{
+"name": "Radio",
+"power_w": 15,
+"usage_duration": "3:00",
+"variable_time": true
+},
+{
+"name": "Turntable",
+"power_w": 15,
+"usage_duration": "2:00",
+"variable_time": true
+}
+],
+"Computing": [
+{
+"name": "Desktop PC (office)",
+"power_w": 200,
+"usage_duration": "8:00",
+"variable_time": true
+},
+{
+"name": "Desktop PC (gaming)",
+"power_w": 400,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Laptop",
+"power_w": 60,
+"usage_duration": "6:00",
+"variable_time": true
+},
+{
+"name": "Monitor (24 inch)",
+"power_w": 30,
+"usage_duration": "8:00",
+"variable_time": true
+},
+{
+"name": "Printer (inkjet)",
+"power_w": 50,
+"usage_duration": "0:15",
+"variable_time": false
+},
+{
+"name": "Printer (laser)",
+"power_w": 400,
+"usage_duration": "0:10",
+"variable_time": false
+},
+{
+"name": "External hard drive",
+"power_w": 10,
+"usage_duration": "8:00",
+"variable_time": true
+},
+{
+"name": "PC speakers",
+"power_w": 20,
+"usage_duration": "6:00",
+"variable_time": true
+},
+{
+"name": "Tablet charging",
+"power_w": 10,
+"usage_duration": "2:00",
+"variable_time": false
+}
+],
+"Lighting": [
+{
+"name": "LED bulb (5W)",
+"power_w": 5,
+"usage_duration": "5:00",
+"variable_time": true
+},
+{
+"name": "LED bulb (10W)",
+"power_w": 10,
+"usage_duration": "5:00",
+"variable_time": true
+},
+{
+"name": "CFL bulb",
+"power_w": 15,
+"usage_duration": "5:00",
+"variable_time": true
+},
+{
+"name": "Incandescent bulb",
+"power_w": 60,
+"usage_duration": "3:00",
+"variable_time": true
+},
+{
+"name": "Desk lamp",
+"power_w": 5,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Floor lamp",
+"power_w": 12,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Security floodlight",
+"power_w": 50,
+"usage_duration": "0:30",
+"variable_time": true
+},
+{
+"name": "LED strip light",
+"power_w": 20,
+"usage_duration": "3:00",
+"variable_time": true
+}
+],
+"Heating & Hot Water": [
+{
+"name": "Electric shower (8.5 kW)",
+"power_w": 8500,
+"usage_duration": "0:07",
+"variable_time": false
+},
+{
+"name": "Electric shower (9.5 kW)",
+"power_w": 9500,
+"usage_duration": "0:07",
+"variable_time": false
+},
+{
+"name": "Electric shower (10.5 kW)",
+"power_w": 10500,
+"usage_duration": "0:07",
+"variable_time": false
+},
+{
+"name": "Immersion heater",
+"power_w": 3000,
+"usage_duration": "2:00",
+"variable_time": true
+},
+{
+"name": "Central heating pump",
+"power_w": 60,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Fan heater (small)",
+"power_w": 500,
+"usage_duration": "1:00",
+"variable_time": true
+},
+{
+"name": "Fan heater (large)",
+"power_w": 2000,
+"usage_duration": "1:00",
+"variable_time": true
+},
+{
+"name": "Oil-filled radiator (small)",
+"power_w": 600,
+"usage_duration": "5:00",
+"variable_time": true
+},
+{
+"name": "Oil-filled radiator (medium)",
+"power_w": 1500,
+"usage_duration": "5:00",
+"variable_time": true
+},
+{
+"name": "Oil-filled radiator (large)",
+"power_w": 2000,
+"usage_duration": "5:00",
+"variable_time": true
+},
+{
+"name": "Heated towel rail",
+"power_w": 100,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Underfloor heating",
+"power_w": 1500,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Air source heat pump",
+"power_w": 1000,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Electric blanket",
+"power_w": 200,
+"usage_duration": "8:00",
+"variable_time": true
+},
+{
+"name": "Shower water pump",
+"power_w": 250,
+"usage_duration": "0:10",
+"variable_time": false
+}
+],
+"Home Essentials": [
+{
+"name": "Wi-Fi router",
+"power_w": 15,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Modem",
+"power_w": 10,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Phone charger",
+"power_w": 5,
+"usage_duration": "1:00",
+"variable_time": false
+},
+{
+"name": "Laptop charger",
+"power_w": 65,
+"usage_duration": "2:00",
+"variable_time": false
+},
+{
+"name": "Vacuum cleaner (modern)",
+"power_w": 900,
+"usage_duration": "0:30",
+"variable_time": false
+},
+{
+"name": "Vacuum cleaner (old)",
+"power_w": 1600,
+"usage_duration": "0:30",
+"variable_time": false
+},
+{
+"name": "Electric shaver",
+"power_w": 15,
+"usage_duration": "0:05",
+"variable_time": false
+},
+{
+"name": "Electric toothbrush charger",
+"power_w": 2,
+"usage_duration": "8:00",
+"variable_time": false
+},
+{
+"name": "Hair dryer",
+"power_w": 1875,
+"usage_duration": "0:10",
+"variable_time": false
+},
+{
+"name": "Hair straightener",
+"power_w": 75,
+"usage_duration": "0:10",
+"variable_time": false
+},
+{
+"name": "Alarm clock",
+"power_w": 2,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Smoke alarm",
+"power_w": 1,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Carbon monoxide detector",
+"power_w": 1,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Desk fan",
+"power_w": 40,
+"usage_duration": "6:00",
+"variable_time": true
+},
+{
+"name": "Room dehumidifier",
+"power_w": 250,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Room humidifier",
+"power_w": 30,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Air purifier",
+"power_w": 30,
+"usage_duration": "6:00",
+"variable_time": true
+},
+{
+"name": "Water heater (tankless)",
+"power_w": 6600,
+"usage_duration": "0:30",
+"variable_time": false
+},
+{
+"name": "Wi-Fi extender",
+"power_w": 10,
+"usage_duration": "24:00",
+"variable_time": false
+}
+],
+"Growbox": [
+{
+"name": "LED grow light (small)",
+"power_w": 200,
+"usage_duration": "18:00",
+"variable_time": true
+},
+{
+"name": "LED grow light (medium)",
+"power_w": 400,
+"usage_duration": "18:00",
+"variable_time": true
+},
+{
+"name": "LED grow light (large)",
+"power_w": 600,
+"usage_duration": "18:00",
+"variable_time": true
+},
+{
+"name": "Circulation fan",
+"power_w": 20,
+"usage_duration": "24:00",
+"variable_time": true
+},
+{
+"name": "Exhaust fan",
+"power_w": 50,
+"usage_duration": "24:00",
+"variable_time": true
+},
+{
+"name": "Water pump",
+"power_w": 40,
+"usage_duration": "12:00",
+"variable_time": true
+},
+{
+"name": "Air pump",
+"power_w": 5,
+"usage_duration": "24:00",
+"variable_time": true
+},
+{
+"name": "Propagation heat mat",
+"power_w": 50,
+"usage_duration": "10:00",
+"variable_time": true
+},
+{
+"name": "Grow tent heater",
+"power_w": 500,
+"usage_duration": "6:00",
+"variable_time": true
+},
+{
+"name": "Dehumidifier",
+"power_w": 250,
+"usage_duration": "6:00",
+"variable_time": true
+},
+{
+"name": "Humidifier",
+"power_w": 30,
+"usage_duration": "8:00",
+"variable_time": true
+},
+{
+"name": "Environmental controller",
+"power_w": 10,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "CO2 monitor",
+"power_w": 5,
+"usage_duration": "24:00",
+"variable_time": false
+}
+],
+"Garden": [
+{
+"name": "Lawn mower (corded small)",
+"power_w": 1200,
+"usage_duration": "0:30",
+"variable_time": false
+},
+{
+"name": "Lawn mower (corded large)",
+"power_w": 1800,
+"usage_duration": "0:40",
+"variable_time": false
+},
+{
+"name": "Lawn mower (cordless)",
+"power_w": 500,
+"usage_duration": "0:30",
+"variable_time": false
+},
+{
+"name": "Hedge trimmer",
+"power_w": 500,
+"usage_duration": "0:20",
+"variable_time": false
+},
+{
+"name": "Leaf blower",
+"power_w": 800,
+"usage_duration": "0:20",
+"variable_time": false
+},
+{
+"name": "Grass trimmer",
+"power_w": 300,
+"usage_duration": "0:20",
+"variable_time": false
+},
+{
+"name": "Electric chainsaw",
+"power_w": 1800,
+"usage_duration": "0:15",
+"variable_time": false
+},
+{
+"name": "Pressure washer (small)",
+"power_w": 1400,
+"usage_duration": "0:30",
+"variable_time": false
+},
+{
+"name": "Pressure washer (large)",
+"power_w": 1800,
+"usage_duration": "0:30",
+"variable_time": false
+},
+{
+"name": "Patio heater",
+"power_w": 2000,
+"usage_duration": "2:00",
+"variable_time": true
+},
+{
+"name": "Pond pump",
+"power_w": 30,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Pond aerator",
+"power_w": 10,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Garden lights",
+"power_w": 50,
+"usage_duration": "4:00",
+"variable_time": true
+},
+{
+"name": "Fountain pump",
+"power_w": 50,
+"usage_duration": "24:00",
+"variable_time": false
+},
+{
+"name": "Electric barbecue",
+"power_w": 1800,
+"usage_duration": "1:00",
+"variable_time": false
+}
+]
+}
