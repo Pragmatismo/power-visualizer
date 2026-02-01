@@ -1,0 +1,947 @@
+{
+  "schema_version": "uk-tariffs-1.0",
+  "country": "GB",
+  "currency": "GBP",
+  "unit": "kWh",
+  "generated_at": "2026-02-01",
+  "sources_note": "Tariff prices change frequently; the rates here are based on supplier information available in late Jan 2026 and the Ofgem price cap for January–March 2026 and may differ by postcode. Always check the supplier’s website for the latest prices.",
+  "suppliers": [
+    {
+      "supplier_id": "octopus-energy",
+      "supplier_name": "Octopus Energy",
+      "supplier_website": "https://octopus.energy",
+      "notes": ["Octopus markets its electricity as 100% renewable.", "Many tariffs require a smart meter and have region‑specific prices.", "Standard variable rates are subject to the Ofgem price cap."],
+      "tariffs": [
+        {
+          "tariff_id": "octopus-flexible-2026-01",
+          "tariff_name": "Flexible Octopus (Standard Variable)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit", "prepay", "credit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["renewable_marketed", "no_exit_fees"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "flat rate (indicative average)",
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {
+                "type": "weekly",
+                "day_sets": [
+                  {"days": ["mon","tue","wed","thu","fri","sat","sun"]}
+                ],
+                "time_ranges": [
+                  {"start": "00:00", "end": "00:00"}
+                ]
+              }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.ofgem.gov.uk/information-consumers/energy-advice-households/energy-price-cap-explained"],
+            "evidence_notes": "Ofgem’s January 2026 price cap gives an average electricity unit rate of 27.69 p/kWh and standing charge around 54.75 p/day for a typical direct‑debit customer【388824003246227†L267-L275】. Octopus’ Flexible tariff follows the price cap and varies by region, so these values are indicative."
+          }
+        },
+        {
+          "tariff_id": "octopus-intelligent-go-2026-01",
+          "tariff_name": "Intelligent Octopus Go (EV)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "off‑peak",
+              "priority": 1,
+              "rate_gbp_per_kwh": 0.07,
+              "schedule": {
+                "type": "weekly",
+                "day_sets": [ {"days": ["mon","tue","wed","thu","fri","sat","sun"]} ],
+                "time_ranges": [ {"start": "23:30", "end": "05:30"} ]
+              }
+            },
+            {
+              "rate_name": "peak (indicative average)",
+              "priority": 0,
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {
+                "type": "weekly",
+                "day_sets": [ {"days": ["mon","tue","wed","thu","fri","sat","sun"]} ],
+                "time_ranges": [ {"start": "05:30", "end": "23:30"} ]
+              }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": [
+              "https://octopus.energy/intelligent-octopus-go/",
+              "https://www.ofgem.gov.uk/information-consumers/energy-advice-households/energy-price-cap-explained"
+            ],
+            "evidence_notes": "Octopus states that Intelligent Octopus Go gives 6 hours of cheap energy (for the whole house) from 11:30 pm to 5:30 am every night at 7 p/kWh【159630542335918†L23-L47】. The daytime rate is close to the standard variable tariff (around 27.69 p/kWh according to the January 2026 price cap【159630542335918†L140-L153】). Standing charges follow the price cap."
+          }
+        },
+        {
+          "tariff_id": "octopus-go-2026-01",
+          "tariff_name": "Octopus Go (EV)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "off‑peak",
+              "priority": 1,
+              "rate_gbp_per_kwh": 0.085,
+              "schedule": {
+                "type": "weekly",
+                "day_sets": [ {"days": ["mon","tue","wed","thu","fri","sat","sun"]} ],
+                "time_ranges": [ {"start": "00:30", "end": "05:30"} ]
+              }
+            },
+            {
+              "rate_name": "peak (indicative average)",
+              "priority": 0,
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {
+                "type": "weekly",
+                "day_sets": [ {"days": ["mon","tue","wed","thu","fri","sat","sun"]} ],
+                "time_ranges": [ {"start": "05:30", "end": "00:30"} ]
+              }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": [
+              "https://octopus.energy/octopus-go/",
+              "https://www.ofgem.gov.uk/information-consumers/energy-advice-households/energy-price-cap-explained"
+            ],
+            "evidence_notes": "Octopus Go offers an off‑peak rate of 8.5 p/kWh between 00:30 and 05:30 every night【230567781468658†L312-L323】. The peak rate varies by region and payment method, but a representative day rate is the January 2026 price cap of 27.69 p/kWh【388824003246227†L267-L275】. Standing charges follow the price cap."
+          }
+        },
+        {
+          "tariff_id": "octopus-agile-2026-01",
+          "tariff_name": "Agile Octopus",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["all"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["half_hourly", "renewable_marketed"]
+          },
+          "complicated": true,
+          "complication_notes": "Agile Octopus is a half‑hourly tariff. Prices change every 30 minutes based on wholesale electricity costs and are capped at 100 p/kWh; typical winter 2022‑23 prices averaged around 35 p/kWh【53819156919984†L22-L24】【53819156919984†L63-L68】. There is a daily standing charge (not specified).",
+          "pricing_model": "half_hourly",
+          "standing_charge_gbp_per_day": null,
+          "rates": [
+            {
+              "rate_name": "half‑hourly dynamic rate",
+              "rate_gbp_per_kwh": null,
+              "schedule": {
+                "type": "weekly",
+                "day_sets": [ {"days": ["mon","tue","wed","thu","fri","sat","sun"]} ],
+                "time_ranges": [ {"start": "00:00", "end": "00:00"} ]
+              }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://octopus.energy/agile/"],
+            "evidence_notes": "The Agile Octopus page explains that customers pay half‑hourly rates tied to wholesale prices with typical winter 2022/23 costs around 35 p/kWh and a cap of 100 p/kWh【53819156919984†L22-L24】【53819156919984†L63-L68】. A daily standing charge applies but is not specified【53819156919984†L85-L87】."
+          }
+        },
+        {
+          "tariff_id": "octopus-cosy-2026-01",
+          "tariff_name": "Cosy Octopus",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["smart_appliance", "renewable_marketed"]
+          },
+          "complicated": true,
+          "complication_notes": "Cosy Octopus is a variable three‑rate tariff. Customers get 8 hours of off‑peak electricity each day (04:00–07:00, 13:00–16:00 and 22:00–00:00). The off‑peak rate is about 51% lower than the day rate and the peak rate (16:00–19:00) is 50% higher than the day rate【789681921850101†L51-L55】. Actual rates vary by region and meter type.",
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": null,
+          "rates": [
+            {
+              "rate_name": "off‑peak (relative)",
+              "priority": 2,
+              "rate_gbp_per_kwh": null,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "04:00", "end": "07:00"}, {"start": "13:00", "end": "16:00"}, {"start": "22:00", "end": "00:00"} ] }
+            },
+            {
+              "rate_name": "day (relative)",
+              "priority": 1,
+              "rate_gbp_per_kwh": null,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "07:00", "end": "16:00"}, {"start": "19:00", "end": "22:00"} ] }
+            },
+            {
+              "rate_name": "peak (relative)",
+              "priority": 0,
+              "rate_gbp_per_kwh": null,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "16:00", "end": "19:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://octopus.energy/cosy/"],
+            "evidence_notes": "Cosy Octopus provides eight hours of cheap electricity each day (04:00–07:00, 13:00–16:00 and 22:00–00:00). Octopus states that the off‑peak rate is 51% cheaper than the day rate and the peak rate is 50% more expensive than the day rate【789681921850101†L51-L55】. Rates vary by region and meter type, so exact unit prices are not given."
+          }
+        },
+        {
+          "tariff_id": "octopus-tracker-2026-01",
+          "tariff_name": "Octopus Tracker",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["all"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["tracker", "renewable_marketed"]
+          },
+          "complicated": true,
+          "complication_notes": "Tracker tariff prices change daily based on wholesale energy costs. Electric rates can vary widely but are capped at 100 p/kWh; gas rates are capped at 30 p/kWh【453953070094260†L41-L47】.",
+          "pricing_model": "tracker",
+          "standing_charge_gbp_per_day": null,
+          "rates": [
+            {
+              "rate_name": "daily tracker rate",
+              "rate_gbp_per_kwh": null,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://octopus.energy/tracker/"],
+            "evidence_notes": "The Tracker tariff changes daily with wholesale prices and is protected by caps of 100 p/kWh (electricity) and 30 p/kWh (gas). Customers see daily updated rates【453953070094260†L41-L47】."
+          }
+        }
+      ]
+    },
+    {
+      "supplier_id": "british-gas",
+      "supplier_name": "British Gas",
+      "supplier_website": "https://www.britishgas.co.uk",
+      "notes": ["British Gas is one of the ‘Big Six’ suppliers and offers standard variable and EV tariffs."],
+      "tariffs": [
+        {
+          "tariff_id": "british-gas-standard-2026-01",
+          "tariff_name": "British Gas Standard Variable",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit", "prepay", "credit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": []
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "flat rate (indicative)",
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.ofgem.gov.uk/information-consumers/energy-advice-households/energy-price-cap-explained"],
+            "evidence_notes": "British Gas’ standard variable electricity tariff follows the Ofgem price cap. The cap for January–March 2026 averages 27.69 p/kWh with a standing charge of 54.75 p/day【388824003246227†L267-L275】. Prices vary by region and meter type."
+          }
+        },
+        {
+          "tariff_id": "british-gas-ev-2026-01",
+          "tariff_name": "British Gas Electric Vehicle Tariff",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "off‑peak",
+              "priority": 1,
+              "rate_gbp_per_kwh": 0.09,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "05:00"} ] }
+            },
+            {
+              "rate_name": "peak (indicative)",
+              "priority": 0,
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "05:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.britishgas.co.uk/ev-tariff"],
+            "evidence_notes": "British Gas’ EV tariff offers cheap electricity (9 p/kWh) for charging between midnight and 5 am【917512925569318†L5-L7】【917512925569318†L21-L22】. Daytime rates are ‘close to normal electricity rates’ and follow the standard variable tariff【917512925569318†L92-L101】. A smart meter and electric vehicle are required."
+          }
+        }
+      ]
+    },
+    {
+      "supplier_id": "edf-energy",
+      "supplier_name": "EDF Energy",
+      "supplier_website": "https://www.edfenergy.com",
+      "notes": ["EDF markets 100% zero‑carbon electricity for its EV tariffs.", "Tariff rates vary by region and meter type."],
+      "tariffs": [
+        {
+          "tariff_id": "edf-standard-variable-2026-01",
+          "tariff_name": "EDF Standard Variable (Direct Debit)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit", "prepay", "credit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": []
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "flat rate (indicative)",
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.ofgem.gov.uk/information-consumers/energy-advice-households/energy-price-cap-explained"],
+            "evidence_notes": "EDF’s standard variable tariff follows the Ofgem price cap; typical direct‑debit unit rate is 27.69 p/kWh with a standing charge around 54.75 p/day【388824003246227†L267-L275】. Prices vary by region and meter type."
+          }
+        },
+        {
+          "tariff_id": "edf-goelectric-2026-01",
+          "tariff_name": "GoElectric (EV)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": true,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "off‑peak",
+              "priority": 1,
+              "rate_gbp_per_kwh": 0.09,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "05:00"} ] }
+            },
+            {
+              "rate_name": "peak (indicative)",
+              "priority": 0,
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "05:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.edfenergy.com/electric-cars/ev-tariffs/goelectric"],
+            "evidence_notes": "EDF’s GoElectric tariff offers an off‑peak rate of 9 p/kWh from midnight to 5 am every night【707489184552266†L27-L31】. Customers must have a smart meter and there is a £75 exit fee【707489184552266†L45-L47】. Daytime rates follow the standard variable price cap (around 27.69 p/kWh)."
+          }
+        },
+        {
+          "tariff_id": "edf-evolve-2026-01",
+          "tariff_name": "Evolve (EV variable)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": true,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "tracker", "renewable_marketed"]
+          },
+          "complicated": true,
+          "complication_notes": "Evolve is a variable EV tariff. The day rate tracks the standard variable tariff, while the off‑peak rate is 10 p/kWh lower than the standard variable price cap【137652816625490†L287-L293】. Both rates vary with the price cap, so values below are indicative.",
+          "pricing_model": "tracker",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "off‑peak (indicative)",
+              "priority": 1,
+              "rate_gbp_per_kwh": 0.1769,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "05:00"} ] }
+            },
+            {
+              "rate_name": "day rate (indicative)",
+              "priority": 0,
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "05:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.edfenergy.com/electric-cars/ev-tariffs/"],
+            "evidence_notes": "EDF explains that under the Evolve tariff, the daytime rate equals the Standard Variable Direct Debit price cap level and the off‑peak rate is 10 p lower than the price cap【137652816625490†L287-L293】. These rates change with the price cap; 17.69 p/kWh off‑peak and 27.69 p/kWh peak are indicative."
+          }
+        }
+      ]
+    },
+    {
+      "supplier_id": "eon-next",
+      "supplier_name": "E.ON Next",
+      "supplier_website": "https://www.eonnext.com",
+      "notes": ["E.ON Next provides variable, economy and EV tariffs. Prices vary by region."],
+      "tariffs": [
+        {
+          "tariff_id": "eon-next-flex-2026-01",
+          "tariff_name": "Next Flex (Single Rate)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit", "prepay", "credit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": []
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.49329,
+          "rates": [
+            {
+              "rate_name": "flat rate (London example)",
+              "rate_gbp_per_kwh": 0.26998,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://assets.ctfassets.net/gmgnreshss7h/k7JMc5w8dmCmIc1kwMnkJ/75e33db0122d984e97210f7bb81cd23e/Single_rate_prices_01_01_26.pdf"],
+            "evidence_notes": "E.ON Next’s single‑rate Next Flex price list effective 1 January 2026 lists London’s direct‑debit standing charge at 47.108 p/day and unit rate at 26.998 p/kWh【847075382291321†L9-L12】. We convert these to pounds (0.49329 GBP/day and 0.26998 GBP/kWh) as a representative example; prices vary by region and payment method." 
+          }
+        },
+        {
+          "tariff_id": "eon-next-drive-2026-01",
+          "tariff_name": "Next Drive (EV)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.49329,
+          "rates": [
+            {
+              "rate_name": "off‑peak",
+              "priority": 1,
+              "rate_gbp_per_kwh": 0.075,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "06:00"} ] }
+            },
+            {
+              "rate_name": "peak (indicative)",
+              "priority": 0,
+              "rate_gbp_per_kwh": 0.26349,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "06:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.eonnext.com/tariffs/next-drive"],
+            "evidence_notes": "E.ON Next’s Next Drive tariff provides lower‑priced electricity at 7.5 p/kWh between 12 am and 6 am with fixed prices for one year and no exit fees【616986956091408†L54-L59】. Off‑peak hours are 12 am–6 am【616986956091408†L127-L132】. Daytime rates are around the standard variable tariff, for example 26.349 p/kWh【616986956091408†L408-L425】."
+          }
+        },
+        {
+          "tariff_id": "eon-next-drive-smart-2026-01",
+          "tariff_name": "Next Drive Smart (EV)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "smart_charging"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.49329,
+          "rates": [
+            {
+              "rate_name": "off‑peak (smart)",
+              "priority": 1,
+              "rate_gbp_per_kwh": 0.065,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "06:00"} ] }
+            },
+            {
+              "rate_name": "peak (boost/urgent charging)",
+              "priority": 0,
+              "rate_gbp_per_kwh": 0.31116,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "06:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.eonnext.com/tariffs/next-drive"],
+            "evidence_notes": "Next Drive Smart is E.ON Next’s cheapest EV tariff, offering an off‑peak rate of 6.5 p/kWh for the first 12 months【616986956091408†L42-L47】. Customers who charge outside the smart‑scheduled window pay a peak rate of about 31.116 p/kWh【616986956091408†L400-L406】. Off‑peak hours are 12 am–6 am daily【616986956091408†L127-L132】."
+          }
+        }
+      ]
+    },
+    {
+      "supplier_id": "ovo-energy",
+      "supplier_name": "OVO Energy",
+      "supplier_website": "https://www.ovoenergy.com",
+      "notes": ["OVO offers standard variable and add‑on tariffs for EVs and heat pumps.", "All values are indicative because OVO does not publish unit rates directly; they follow the price cap."],
+      "tariffs": [
+        {
+          "tariff_id": "ovo-standard-variable-2026-01",
+          "tariff_name": "OVO Standard Variable (Simpler Energy)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit", "prepay", "credit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": []
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {
+              "rate_name": "flat rate (indicative)",
+              "rate_gbp_per_kwh": 0.2769,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.ovoenergy.com/pricecap"],
+            "evidence_notes": "OVO explains that its standard variable tariff changes every three months in line with the price cap; the January 2026 cap sets electricity unit rates around 27.69 p/kWh with standing charges around 54.75 p/day【875069350517114†L79-L88】. Actual prices vary by region."
+          }
+        },
+        {
+          "tariff_id": "ovo-charge-anytime-payg-2025-11",
+          "tariff_name": "Charge Anytime Pay‑As‑You‑Go (EV add‑on)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["all"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["ev_friendly", "bundle"]
+          },
+          "complicated": true,
+          "complication_notes": "Charge Anytime is an add‑on rather than a full tariff. OVO credits the customer’s bill for EV charging at a flat rate (14 p/kWh) and offers a partnership rate of 7 p/kWh for eligible Volvo and Volkswagen customers【313829933999579†L72-L90】. It applies only to electricity used for EV charging; other household consumption is billed at the customer’s underlying tariff rate.",
+          "pricing_model": "bundle",
+          "standing_charge_gbp_per_day": null,
+          "rates": [
+            {
+              "rate_name": "EV charging credit",
+              "rate_gbp_per_kwh": 0.14,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] }
+            },
+            {
+              "rate_name": "partnership EV rate (Volvo/VW)",
+              "rate_gbp_per_kwh": 0.07,
+              "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] }
+            }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2025-11-04", "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.ovoenergy.com/terms/charge-anytime/add-on-plan-details"],
+            "evidence_notes": "The Charge Anytime product information shows a pay‑as‑you‑go rate of 14 p/kWh and a partnership rate of 7 p/kWh for eligible Volvo and Volkswagen Group customers【313829933999579†L72-L90】. It is an add‑on to an existing OVO tariff and applies only to EV charging."
+          }
+        },
+        {
+          "tariff_id": "ovo-heat-pump-plus-2025-10",
+          "tariff_name": "Heat Pump Plus (Add‑on)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["all"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["heat_pump", "bundle"]
+          },
+          "complicated": true,
+          "complication_notes": "Heat Pump Plus is an add‑on that gives 15 p/kWh for electricity used by a compatible heat pump. Only heat pump consumption is billed at 15 p/kWh; other consumption follows the customer’s underlying tariff.",
+          "pricing_model": "bundle",
+          "standing_charge_gbp_per_day": null,
+          "rates": [
+            {"rate_name": "heat‑pump rate", "rate_gbp_per_kwh": 0.15, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://company.ovo.com/ovo-and-havenwise-launch-heat-pump-trial-to-make-home-heating-smarter-and-more-affordable/"],
+            "evidence_notes": "An OVO Group media release notes that the Heat Pump Plus tariff add‑on allows customers with compatible heat pumps to pay 15 p/kWh for electricity used by the heat pump【983464710396251†L78-L80】."
+          }
+        }
+      ]
+    },
+    {
+      "supplier_id": "scottishpower",
+      "supplier_name": "ScottishPower",
+      "supplier_website": "https://www.scottishpower.co.uk",
+      "notes": ["ScottishPower offers time‑of‑use EV tariffs and add‑ons; rates vary by region.", "Tariffs require smart meters for EV products."],
+      "tariffs": [
+        {
+          "tariff_id": "scottishpower-standard-2026-01",
+          "tariff_name": "ScottishPower Standard Variable",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit", "prepay", "credit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": []
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {"rate_name": "flat rate (indicative)", "rate_gbp_per_kwh": 0.2769, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {"retrieved_at": "2026-02-01", "source_urls": ["https://www.ofgem.gov.uk/information-consumers/energy-advice-households/energy-price-cap-explained"], "evidence_notes": "ScottishPower’s standard variable tariff is tied to the Ofgem price cap; typical unit rates are 27.69 p/kWh with standing charges around 54.75 p/day【388824003246227†L267-L275】. Prices vary by region."}
+        },
+        {
+          "tariff_id": "scottishpower-ev-saver-2026-01",
+          "tariff_name": "EV Saver Tariff",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": true,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {"rate_name": "off‑peak", "priority": 1, "rate_gbp_per_kwh": 0.072, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "05:00"} ] } },
+            {"rate_name": "peak (indicative)", "priority": 0, "rate_gbp_per_kwh": 0.2769, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "05:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.scottishpower.co.uk/ev-chargers-and-tariffs"],
+            "evidence_notes": "ScottishPower’s EV Saver tariff provides the lowest off‑peak rate at 7.2 p/kWh between midnight and 5 am【985254454623423†L115-L119】. The tariff supplies cheaper electricity for the whole house during those hours and uses renewable electricity【985254454623423†L115-L119】. Daytime rates follow the standard variable tariff (around 27.69 p/kWh)."
+          }
+        },
+        {
+          "tariff_id": "scottishpower-ev-optimise-2026-01",
+          "tariff_name": "EV Optimise Add‑on",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["all"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["ev_friendly", "smart_charging", "bundle"]
+          },
+          "complicated": true,
+          "complication_notes": "EV Optimise is an add‑on that schedules EV charging at the cheapest, greenest times. It provides EV charging at 9 p/kWh whenever the app schedules charging【985254454623423†L97-L103】. The add‑on applies only to EV charging and does not change the underlying household tariff.",
+          "pricing_model": "bundle",
+          "standing_charge_gbp_per_day": null,
+          "rates": [
+            {"rate_name": "scheduled EV charging", "rate_gbp_per_kwh": 0.09, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": null, "end_date": null},
+          "source": {
+            "retrieved_at": "2026-02-01",
+            "source_urls": ["https://www.scottishpower.co.uk/ev-chargers-and-tariffs"],
+            "evidence_notes": "ScottishPower’s EV Optimise add‑on can be added to most tariffs and smart‑charges your EV at 9 p/kWh【985254454623423†L97-L103】. Charging is scheduled via the app; outside scheduled times, the underlying tariff applies."
+          }
+        }
+      ]
+    },
+    {
+      "supplier_id": "good-energy",
+      "supplier_name": "Good Energy",
+      "supplier_website": "https://www.goodenergy.co.uk",
+      "notes": ["Good Energy supplies electricity from renewable sources and publishes detailed Tariff Information Labels.", "Prices vary by region; values below use the London region as an example."],
+      "tariffs": [
+        {
+          "tariff_id": "good-energy-standard-2026-01",
+          "tariff_name": "Good Energy Standard (SVT)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5703,
+          "rates": [
+            {"rate_name": "flat rate (London example)", "rate_gbp_per_kwh": 0.2634, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {"retrieved_at": "2026-02-01", "source_urls": ["http://www.goodenergy.co.uk/wp-content/uploads/2025/12/SVT-TIL-Q1-26.pdf"], "evidence_notes": "Good Energy’s TIL for SVT Q1 2026 lists London’s unit rate at 26.34 p/kWh with a standing charge of 57.03 p/day【230020368021271†L15-L18】. Other regions have different rates."
+          }
+        },
+        {
+          "tariff_id": "good-energy-ev-charge-2026-11",
+          "tariff_name": "Good Energy EV Charge",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": true,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5016,
+          "rates": [
+            {"rate_name": "off‑peak", "priority": 1, "rate_gbp_per_kwh": 0.066, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "05:00"} ] } },
+            {"rate_name": "peak", "priority": 0, "rate_gbp_per_kwh": 0.2934, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "05:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2025-11-11", "end_date": "2026-11-30"},
+          "source": {"retrieved_at": "2026-02-01", "source_urls": ["https://www.goodenergy.co.uk/wp-content/uploads/2025/11/Good-Energy-EV-Charge-TIL-Nov26.pdf"], "evidence_notes": "The Good Energy EV Charge TIL shows that for London the off‑peak rate is 6.60 p/kWh between midnight and 5 am, the peak rate is 29.34 p/kWh, and the standing charge is 50.16 p/day【632267585911540†L15-L18】【632267585911540†L36-L37】. Rates differ by region."
+          }
+        },
+        {
+          "tariff_id": "good-energy-heat-pump-2026-01",
+          "tariff_name": "Good Energy Heat Pump Tariff",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": true,
+            "contract_length_months": 12,
+            "usp_tags": ["heat_pump", "renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.4874,
+          "rates": [
+            {"rate_name": "off‑peak", "priority": 1, "rate_gbp_per_kwh": 0.13, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "05:00", "end": "09:00"}, {"start": "13:00", "end": "16:00"} ] } },
+            {"rate_name": "peak", "priority": 0, "rate_gbp_per_kwh": 0.2891, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "09:00", "end": "13:00"}, {"start": "16:00", "end": "05:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-13", "end_date": "2027-01-31"},
+          "source": {"retrieved_at": "2026-02-01", "source_urls": ["http://www.goodenergy.co.uk/wp-content/uploads/2026/01/Good-Energy-Heat-Pump-Jan27-1.pdf"], "evidence_notes": "The Good Energy Heat Pump TIL lists a peak rate of 28.91 p/kWh and an off‑peak rate of 13.00 p/kWh for London with a standing charge of 48.74 p/day【506204835162722†L12-L16】【506204835162722†L14-L18】. The tariff provides seven off‑peak hours split between 5–9 am and 1–4 pm【506204835162722†L31-L32】." }
+        }
+      ]
+    },
+    {
+      "supplier_id": "so-energy",
+      "supplier_name": "So Energy",
+      "supplier_website": "https://www.so.energy",
+      "notes": ["So Energy specialises in renewable energy and offers flexible and EV tariffs.", "Standard variable rates follow the energy price cap; EV tariff rates are fixed."],
+      "tariffs": [
+        {
+          "tariff_id": "so-flex-2026-01",
+          "tariff_name": "So Flex (Standard Variable)",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": false,
+            "payment_methods": ["direct_debit", "prepay", "credit"],
+            "exit_fees": false,
+            "contract_length_months": 0,
+            "usp_tags": ["renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {"rate_name": "flat rate (indicative)", "rate_gbp_per_kwh": 0.2769, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2026-01-01", "end_date": null},
+          "source": {"retrieved_at": "2026-02-01", "source_urls": ["https://www.so.energy/price-cap"], "evidence_notes": "So Energy’s standard variable So Flex tariff aligns with the Ofgem price cap; unit rates are approximately 27.69 p/kWh with a 54.75 p/day standing charge【388824003246227†L267-L275】. Actual prices vary by postcode."}
+        },
+        {
+          "tariff_id": "so-ev-2025-07",
+          "tariff_name": "So EV Tariff",
+          "market_segment": "domestic",
+          "availability": {
+            "countries": ["GB"],
+            "regions": ["by_postcode"],
+            "new_customers_only": false,
+            "smart_meter_required": true,
+            "payment_methods": ["direct_debit"],
+            "exit_fees": true,
+            "contract_length_months": 12,
+            "usp_tags": ["ev_friendly", "renewable_marketed"]
+          },
+          "complicated": false,
+          "complication_notes": null,
+          "pricing_model": "flat_or_tou",
+          "standing_charge_gbp_per_day": 0.5475,
+          "rates": [
+            {"rate_name": "off‑peak", "priority": 1, "rate_gbp_per_kwh": 0.065, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "00:00", "end": "05:00"} ] } },
+            {"rate_name": "peak (indicative)", "priority": 0, "rate_gbp_per_kwh": 0.2769, "schedule": {"type": "weekly", "day_sets": [{"days": ["mon","tue","wed","thu","fri","sat","sun"]}], "time_ranges": [ {"start": "05:00", "end": "00:00"} ] } }
+          ],
+          "export": {"has_export_rate": false, "export_notes": null, "export_rates": []},
+          "effective": {"start_date": "2025-07-01", "end_date": null},
+          "source": {"retrieved_at": "2026-02-01", "source_urls": ["https://www.so.energy/media-centre/so-energy-launches-so-ev-one-of-the-uks-most-competitive-home-ev-charging-tariffs"], "evidence_notes": "So Energy’s press release announcing the So EV tariff states that it offers a low overnight rate of 6.5 p/kWh between midnight and 5 am and is fixed for 12 months【457933675486428†L59-L88】. Daytime rates follow the underlying variable tariff."
+          }
+        }
+      ]
+    }
+  ]
+}
