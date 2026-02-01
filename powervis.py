@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QFileDialog, QMessageBox, QComboBox, QSpinBox, QDoubleSpinBox,
     QDialog, QFormLayout, QDialogButtonBox, QGroupBox, QCheckBox,
-    QLineEdit, QHeaderView, QListWidget, QListWidgetItem, QScrollArea
+    QLineEdit, QHeaderView, QListWidget, QListWidgetItem, QScrollArea,
+    QInputDialog
 )
 
 # =========================
@@ -103,6 +104,10 @@ def parse_duration_text(text: str) -> Optional[int]:
         return max(1, total)
     except Exception:
         return None
+
+
+def format_duration_export(m: int) -> str:
+    return format_duration_minutes(m)
 
 
 def slugify(text: str) -> str:
@@ -193,6 +198,7 @@ class DeviceType:
 @dataclass
 class Device:
     name: str = "New device"
+    category: str = "Custom"
     dtype: str = DeviceType.SCHEDULED
     power_w: float = 20.0
     enabled: bool = True
@@ -205,6 +211,7 @@ class Device:
     def to_dict(self) -> dict:
         return {
             "name": self.name,
+            "category": self.category,
             "dtype": self.dtype,
             "power_w": self.power_w,
             "enabled": self.enabled,
@@ -225,6 +232,7 @@ class Device:
     def from_dict(d: dict) -> "Device":
         dev = Device(
             name=d.get("name", "Device"),
+            category=d.get("category", "Custom"),
             dtype=d.get("dtype", DeviceType.SCHEDULED),
             power_w=float(d.get("power_w", 20.0)),
         )
@@ -246,6 +254,32 @@ class Device:
         dev.events = [Event(**e).normalized() for e in d.get("events", [])]
         dev.apply_usage_settings()
         return dev
+
+
+def device_from_catalog_item(item: dict, category: str) -> Optional[Device]:
+    if not isinstance(item, dict):
+        return None
+    name = str(item.get("name", "Device")).strip() or "Device"
+    try:
+        power_w = float(item.get("power_w", 20.0))
+    except Exception:
+        power_w = 20.0
+    variable = parse_bool(item.get("variable_time", True))
+    duration_text = str(item.get("usage_duration", "")).strip()
+    duration_min = parse_duration_text(duration_text)
+    if duration_min is None:
+        duration_min = 30
+    dev = Device(
+        name=name,
+        category=category or "Custom",
+        dtype=DeviceType.SCHEDULED,
+        power_w=power_w,
+        enabled=False,
+        default_duration_min=duration_min,
+        variable=variable,
+    )
+    dev.apply_usage_settings()
+    return dev
 
 
 @dataclass
@@ -1541,19 +1575,21 @@ class DeviceListDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels([
             "Show",
+            "Category",
             "Name",
             "Power (W)",
             "Usage duration (H:M)",
             "Variable",
         ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed | QTableWidget.SelectedClicked)
@@ -1592,20 +1628,23 @@ class DeviceListDialog(QDialog):
             enabled_item.setCheckState(Qt.Checked if dev.enabled else Qt.Unchecked)
             self.table.setItem(row, 0, enabled_item)
 
+            category_item = QTableWidgetItem(dev.category)
+            self.table.setItem(row, 1, category_item)
+
             name_item = QTableWidgetItem(dev.name)
-            self.table.setItem(row, 1, name_item)
+            self.table.setItem(row, 2, name_item)
 
             power_item = QTableWidgetItem(f"{dev.power_w:g}")
-            self.table.setItem(row, 2, power_item)
+            self.table.setItem(row, 3, power_item)
 
             duration_item = QTableWidgetItem(format_duration_minutes(dev.default_duration_min))
-            self.table.setItem(row, 3, duration_item)
+            self.table.setItem(row, 4, duration_item)
 
             variable_item = QTableWidgetItem("")
             variable_item.setFlags(variable_item.flags() | Qt.ItemIsUserCheckable)
             variable_item.setFlags(variable_item.flags() & ~Qt.ItemIsEditable)
             variable_item.setCheckState(Qt.Checked if dev.variable else Qt.Unchecked)
-            self.table.setItem(row, 4, variable_item)
+            self.table.setItem(row, 5, variable_item)
         self.table.blockSignals(False)
 
     def _notify_parent(self):
@@ -1627,9 +1666,12 @@ class DeviceListDialog(QDialog):
             dev.enabled = (item.checkState() == Qt.Checked)
             updated = True
         elif col == 1:
-            dev.name = item.text().strip() or dev.name
+            dev.category = item.text().strip() or dev.category
             updated = True
         elif col == 2:
+            dev.name = item.text().strip() or dev.name
+            updated = True
+        elif col == 3:
             try:
                 dev.power_w = max(0.0, float(item.text()))
                 updated = True
@@ -1637,7 +1679,7 @@ class DeviceListDialog(QDialog):
                 self.table.blockSignals(True)
                 item.setText(f"{dev.power_w:g}")
                 self.table.blockSignals(False)
-        elif col == 3:
+        elif col == 4:
             parsed = parse_duration_text(item.text())
             if parsed is None:
                 self.table.blockSignals(True)
@@ -1646,14 +1688,14 @@ class DeviceListDialog(QDialog):
             else:
                 dev.default_duration_min = parsed
                 updated = True
-        elif col == 4:
+        elif col == 5:
             dev.variable = (item.checkState() == Qt.Checked)
             updated = True
 
         if updated:
             dev.apply_usage_settings()
             self.table.blockSignals(True)
-            self.table.item(row, 3).setText(format_duration_minutes(dev.default_duration_min))
+            self.table.item(row, 4).setText(format_duration_minutes(dev.default_duration_min))
             self.table.blockSignals(False)
             self._notify_parent()
 
@@ -1662,9 +1704,10 @@ class DeviceListDialog(QDialog):
             return
         dev = Device(
             name="Device",
+            category="Custom",
             dtype=DeviceType.SCHEDULED,
             power_w=20.0,
-            enabled=True,
+            enabled=False,
             default_duration_min=30,
             variable=True,
         )
@@ -1702,6 +1745,57 @@ class DeviceListDialog(QDialog):
         self.refresh_table()
         self.table.selectRow(insert_at - 1)
         self._notify_parent()
+
+# =========================
+# Device import dialog
+# =========================
+
+class DeviceImportDialog(QDialog):
+    def __init__(self, parent=None, categories: Optional[List[str]] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Import Devices")
+        self.setModal(True)
+        self._show_device_list = False
+        self._checkboxes: Dict[str, QCheckBox] = {}
+
+        layout = QVBoxLayout(self)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        list_container = QWidget()
+        list_layout = QVBoxLayout(list_container)
+        list_layout.setContentsMargins(4, 4, 4, 4)
+
+        for category in categories or []:
+            checkbox = QCheckBox(category)
+            checkbox.setChecked(True)
+            list_layout.addWidget(checkbox)
+            self._checkboxes[category] = checkbox
+
+        list_layout.addStretch(1)
+        scroll.setWidget(list_container)
+        layout.addWidget(scroll)
+
+        self.clear_checkbox = QCheckBox("Clear current devices")
+        layout.addWidget(self.clear_checkbox)
+
+        buttons = QDialogButtonBox()
+        ok_btn = buttons.addButton("Ok", QDialogButtonBox.AcceptRole)
+        cancel_btn = buttons.addButton("Cancel", QDialogButtonBox.RejectRole)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self._accept_and_show_list)
+        layout.addWidget(buttons)
+
+    def _accept_and_show_list(self):
+        self._show_device_list = True
+        self.accept()
+
+    def get_result(self) -> Tuple[List[str], bool, bool]:
+        selected = [
+            name for name, checkbox in self._checkboxes.items()
+            if checkbox.isChecked()
+        ]
+        return selected, self.clear_checkbox.isChecked(), self._show_device_list
 
 # =========================
 # Scheduled block dialog
@@ -2667,8 +2761,15 @@ class MainWindow(QMainWindow):
 
         devm = mb.addMenu("&Devices")
         act_device_list = QAction("Device List…", self)
+        act_import_devices = QAction("Import…", self)
+        act_export_devices = QAction("Export…", self)
         devm.addAction(act_device_list)
+        devm.addSeparator()
+        devm.addAction(act_import_devices)
+        devm.addAction(act_export_devices)
         act_device_list.triggered.connect(self.open_device_list)
+        act_import_devices.triggered.connect(self.import_devices)
+        act_export_devices.triggered.connect(self.export_devices)
 
         timingm = mb.addMenu("&Timing")
         act_custom_periods = QAction("Custom Periods…", self)
@@ -2772,6 +2873,69 @@ class MainWindow(QMainWindow):
             self.device_dialog = None
             self.refresh_tables()
             self.recompute()
+
+    def import_devices(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import devices", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as ex:
+            QMessageBox.critical(self, "Import failed", f"Could not import:\n{ex}")
+            return
+        if not isinstance(data, dict):
+            QMessageBox.critical(self, "Import failed", "Device list must be a JSON object of categories.")
+            return
+        categories = list(data.keys())
+        dlg = DeviceImportDialog(self, categories)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        selected_categories, clear_current, show_device_list = dlg.get_result()
+        imported_devices: List[Device] = []
+        for category in selected_categories:
+            items = data.get(category, [])
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                dev = device_from_catalog_item(item, category)
+                if dev:
+                    imported_devices.append(dev)
+        if clear_current:
+            self.project.devices = []
+        self.project.devices.extend(imported_devices)
+        self.refresh_tables()
+        self.recompute()
+        if show_device_list:
+            self.open_device_list()
+
+    def export_devices(self):
+        name, ok = QInputDialog.getText(self, "Export devices", "File name")
+        if not ok:
+            return
+        name = name.strip()
+        if not name:
+            return
+        default_name = name if name.lower().endswith(".json") else f"{name}.json"
+        path, _ = QFileDialog.getSaveFileName(self, "Export devices", default_name, "JSON (*.json)")
+        if not path:
+            return
+        if not path.lower().endswith(".json"):
+            path += ".json"
+        payload: Dict[str, List[dict]] = {}
+        for dev in self.project.devices:
+            category = dev.category.strip() or "Custom"
+            payload.setdefault(category, []).append({
+                "name": dev.name,
+                "power_w": dev.power_w,
+                "usage_duration": format_duration_export(dev.default_duration_min),
+                "variable_time": dev.variable,
+            })
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+        except Exception as ex:
+            QMessageBox.critical(self, "Export failed", f"Could not export:\n{ex}")
 
     # ---------------------
     # Tariffs
