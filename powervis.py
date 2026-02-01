@@ -1,6 +1,8 @@
+import copy
 import json
 import math
 import os
+import re
 import sys
 from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Tuple, Dict
@@ -16,7 +18,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QFileDialog, QMessageBox, QComboBox, QSpinBox, QDoubleSpinBox,
     QDialog, QFormLayout, QDialogButtonBox, QGroupBox, QCheckBox,
-    QLineEdit, QHeaderView, QListWidget, QListWidgetItem
+    QLineEdit, QHeaderView, QListWidget, QListWidgetItem, QScrollArea
 )
 
 # =========================
@@ -93,6 +95,57 @@ def parse_duration_text(text: str) -> Optional[int]:
         return max(1, total)
     except Exception:
         return None
+
+
+def slugify(text: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower())
+    return cleaned.strip("-")
+
+
+def derive_modified_path(path: str) -> str:
+    if path.lower().endswith("_modified.json"):
+        return path
+    base, ext = os.path.splitext(path)
+    if ext.lower() != ".json":
+        ext = ".json"
+    return f"{base}_modified{ext}"
+
+
+def parse_hhmm(text: str) -> Optional[int]:
+    text = text.strip()
+    if not re.match(r"^\d{2}:\d{2}$", text):
+        return None
+    hh = int(text[:2])
+    mm = int(text[3:])
+    if hh < 0 or hh > 24 or mm < 0 or mm > 59:
+        return None
+    if hh == 24 and mm != 0:
+        return None
+    return hh * 60 + mm
+
+
+def is_all_days(day_sets: List[dict]) -> bool:
+    if not day_sets:
+        return True
+    all_days = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+    for day_set in day_sets:
+        days = set(day_set.get("days", []))
+        if all_days.issubset(days):
+            return True
+    return False
+
+
+def is_all_day_rate(rate: dict) -> bool:
+    schedule = rate.get("schedule") or {}
+    day_sets = schedule.get("day_sets", [])
+    if not is_all_days(day_sets):
+        return False
+    for time_range in schedule.get("time_ranges", []):
+        start = parse_hhmm(time_range.get("start", ""))
+        end = parse_hhmm(time_range.get("end", ""))
+        if start == 0 and end == MINUTES_PER_DAY:
+            return True
+    return False
 
 
 @dataclass
@@ -257,6 +310,30 @@ class SettingsModel:
     # Optional free window rule (solar simulation-ish)
     free_rule: FreeRule = field(default_factory=FreeRule)
 
+    # Optional imported tariff schedule
+    tariff_minute_rates: Optional[List[float]] = None
+    tariff_label: Optional[str] = None
+
+    def clone(self) -> "SettingsModel":
+        return SettingsModel(
+            currency_symbol=self.currency_symbol,
+            month_days=self.month_days,
+            step_minutes=self.step_minutes,
+            base_rate_flat=self.base_rate_flat,
+            use_time_of_day=self.use_time_of_day,
+            offpeak_rate=self.offpeak_rate,
+            offpeak_start_min=self.offpeak_start_min,
+            offpeak_end_min=self.offpeak_end_min,
+            free_rule=FreeRule(
+                enabled=self.free_rule.enabled,
+                start_min=self.free_rule.start_min,
+                end_min=self.free_rule.end_min,
+                free_kw_threshold=self.free_rule.free_kw_threshold,
+            ),
+            tariff_minute_rates=list(self.tariff_minute_rates) if self.tariff_minute_rates else None,
+            tariff_label=self.tariff_label,
+        )
+
     def to_qsettings(self, qs: QSettings):
         qs.setValue("currency_symbol", self.currency_symbol)
         qs.setValue("month_days", self.month_days)
@@ -348,6 +425,26 @@ class Project:
         return p
 
 
+@dataclass
+class TariffDocument:
+    source_path: str
+    save_path: str
+    data: dict
+
+
+@dataclass
+class TariffEntry:
+    document: TariffDocument
+    supplier_index: int
+    tariff_index: int
+
+    def supplier(self) -> dict:
+        return self.document.data["suppliers"][self.supplier_index]
+
+    def tariff(self) -> dict:
+        return self.supplier()["tariffs"][self.tariff_index]
+
+
 # =========================
 # Simulation
 # =========================
@@ -364,6 +461,8 @@ class SimResult:
 
 def tariff_rate_for_minute(settings: SettingsModel, minute: int) -> float:
     """Return £/kWh rate for the minute (base schedule only)."""
+    if settings.tariff_minute_rates:
+        return settings.tariff_minute_rates[clamp(minute, 0, MINUTES_PER_DAY - 1)]
     if not settings.use_time_of_day:
         return settings.base_rate_flat
     if is_minute_in_window(minute, settings.offpeak_start_min, settings.offpeak_end_min):
@@ -372,6 +471,17 @@ def tariff_rate_for_minute(settings: SettingsModel, minute: int) -> float:
 
 
 def tariff_segments(settings: SettingsModel) -> List[Tuple[int, int, float]]:
+    if settings.tariff_minute_rates:
+        segments: List[Tuple[int, int, float]] = []
+        current_rate = settings.tariff_minute_rates[0]
+        start = 0
+        for minute in range(1, MINUTES_PER_DAY + 1):
+            next_rate = None if minute == MINUTES_PER_DAY else settings.tariff_minute_rates[minute]
+            if minute == MINUTES_PER_DAY or next_rate != current_rate:
+                segments.append((start, minute, current_rate))
+                start = minute
+                current_rate = next_rate
+        return segments
     if not settings.use_time_of_day:
         return [(0, MINUTES_PER_DAY, settings.base_rate_flat)]
     segments: List[Tuple[int, int, float]] = []
@@ -387,6 +497,57 @@ def tariff_segments(settings: SettingsModel) -> List[Tuple[int, int, float]]:
             start = minute
             current_rate = next_rate
     return segments
+
+
+def build_tariff_minute_rates(tariff: dict) -> List[float]:
+    minute_rates = [0.0] * MINUTES_PER_DAY
+    minute_priority = [-10**9] * MINUTES_PER_DAY
+    rates = tariff.get("rates") or []
+    for rate in rates:
+        rate_value = rate.get("rate_gbp_per_kwh")
+        if rate_value is None:
+            continue
+        priority = int(rate.get("priority", 0))
+        schedule = rate.get("schedule") or {}
+        time_ranges = schedule.get("time_ranges") or []
+        if not time_ranges:
+            continue
+        for time_range in time_ranges:
+            start = parse_hhmm(time_range.get("start", ""))
+            end = parse_hhmm(time_range.get("end", ""))
+            if start is None or end is None or start == end:
+                continue
+            for minute in range(MINUTES_PER_DAY):
+                if is_minute_in_window(minute, start, end):
+                    if priority >= minute_priority[minute]:
+                        minute_priority[minute] = priority
+                        minute_rates[minute] = float(rate_value)
+    return minute_rates
+
+
+def tariff_headline(tariff: dict, currency_symbol: str) -> str:
+    rates = tariff.get("rates") or []
+    if tariff.get("complicated") or not rates:
+        return "Complicated"
+    if all(rate.get("rate_gbp_per_kwh") is None for rate in rates):
+        return "Complicated"
+    if tariff.get("pricing_model") == "flat_or_tou":
+        for rate in rates:
+            if rate.get("rate_gbp_per_kwh") is None:
+                continue
+            if is_all_day_rate(rate):
+                return f"{currency_symbol}{float(rate['rate_gbp_per_kwh']):.4f}/kWh"
+        return "TOU"
+    return "Complicated"
+
+
+def load_tariff_document(path: str) -> TariffDocument:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if data.get("schema_version") != "uk-tariffs-1.0":
+        raise ValueError("Unsupported tariff schema version.")
+    save_path = derive_modified_path(path)
+    return TariffDocument(source_path=path, save_path=save_path, data=data)
 
 
 def is_free_this_minute(settings: SettingsModel, minute: int, total_kw: float) -> bool:
@@ -598,7 +759,7 @@ class SettingsDialog(QDialog):
         self.flat_rate.setEnabled(True)
 
     def get_model(self) -> SettingsModel:
-        m = SettingsModel.from_qsettings(QSettings())  # start from current persisted defaults
+        m = self.model.clone()
         m.currency_symbol = self.currency_symbol.text().strip() or "£"
         m.month_days = 30
         m.step_minutes = 1
@@ -753,6 +914,570 @@ class CustomPeriodsDialog(QDialog):
             )
             for cp in self._periods
         ]
+
+
+# =========================
+# Tariff dialogs
+# =========================
+
+class TariffImportDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Import Tariffs")
+        self.setModal(True)
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        path_row = QHBoxLayout()
+        self.path_edit = QLineEdit()
+        browse_btn = QPushButton("Browse…")
+        path_row.addWidget(self.path_edit, stretch=1)
+        path_row.addWidget(browse_btn)
+        form.addRow("Tariff JSON file", path_row)
+        layout.addLayout(form)
+
+        self.append_checkbox = QCheckBox("Append to current tariff list")
+        layout.addWidget(self.append_checkbox)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        browse_btn.clicked.connect(self._browse)
+
+    def _browse(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import tariffs", "", "JSON (*.json)")
+        if path:
+            self.path_edit.setText(path)
+
+    def get_result(self) -> Tuple[Optional[str], bool]:
+        path = self.path_edit.text().strip()
+        if not path:
+            return None, False
+        return path, self.append_checkbox.isChecked()
+
+
+class TariffRateEditor(QGroupBox):
+    def __init__(self, rate: Optional[dict] = None, parent=None):
+        super().__init__(parent)
+        self.setTitle("Rate")
+        self._rate = copy.deepcopy(rate) if rate else {}
+        self._extra_day_sets = []
+        self._build_ui()
+        self._load_rate()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+        self.rate_name = QLineEdit()
+        form.addRow("Rate name", self.rate_name)
+
+        priority_row = QHBoxLayout()
+        self.use_priority = QCheckBox("Use priority")
+        self.priority_value = QSpinBox()
+        self.priority_value.setRange(-1000, 1000)
+        priority_row.addWidget(self.use_priority)
+        priority_row.addWidget(self.priority_value)
+        form.addRow("Priority", priority_row)
+
+        rate_row = QHBoxLayout()
+        self.has_rate = QCheckBox("Has rate")
+        self.rate_value = QDoubleSpinBox()
+        self.rate_value.setDecimals(4)
+        self.rate_value.setRange(0.0, 10.0)
+        self.rate_value.setSingleStep(0.01)
+        rate_row.addWidget(self.has_rate)
+        rate_row.addWidget(self.rate_value)
+        form.addRow("Rate (GBP/kWh)", rate_row)
+
+        layout.addLayout(form)
+
+        day_group = QGroupBox("Days (first day set)")
+        day_layout = QHBoxLayout(day_group)
+        self.day_checks: Dict[str, QCheckBox] = {}
+        for day in ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]:
+            cb = QCheckBox(day.capitalize()[:3])
+            self.day_checks[day] = cb
+            day_layout.addWidget(cb)
+        layout.addWidget(day_group)
+
+        ranges_group = QGroupBox("Time ranges")
+        ranges_layout = QVBoxLayout(ranges_group)
+        self.ranges_table = QTableWidget(0, 2)
+        self.ranges_table.setHorizontalHeaderLabels(["Start (HH:MM)", "End (HH:MM)"])
+        self.ranges_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.ranges_table.verticalHeader().setVisible(False)
+        ranges_layout.addWidget(self.ranges_table)
+
+        btn_row = QHBoxLayout()
+        self.btn_add_range = QPushButton("Add time range")
+        self.btn_del_range = QPushButton("Remove selected")
+        btn_row.addWidget(self.btn_add_range)
+        btn_row.addWidget(self.btn_del_range)
+        ranges_layout.addLayout(btn_row)
+        layout.addWidget(ranges_group)
+
+        self.btn_add_range.clicked.connect(self._add_time_range)
+        self.btn_del_range.clicked.connect(self._remove_time_ranges)
+        self.has_rate.toggled.connect(self.rate_value.setEnabled)
+        self.use_priority.toggled.connect(self.priority_value.setEnabled)
+
+    def _load_rate(self):
+        self.rate_name.setText(self._rate.get("rate_name", ""))
+        priority = self._rate.get("priority")
+        if priority is None:
+            self.use_priority.setChecked(False)
+            self.priority_value.setValue(0)
+        else:
+            self.use_priority.setChecked(True)
+            self.priority_value.setValue(int(priority))
+        rate_value = self._rate.get("rate_gbp_per_kwh")
+        if rate_value is None:
+            self.has_rate.setChecked(False)
+            self.rate_value.setValue(0.0)
+        else:
+            self.has_rate.setChecked(True)
+            self.rate_value.setValue(float(rate_value))
+
+        schedule = self._rate.get("schedule") or {}
+        day_sets = schedule.get("day_sets") or []
+        first_days = []
+        if day_sets:
+            first_days = day_sets[0].get("days", [])
+            self._extra_day_sets = day_sets[1:]
+        for day, cb in self.day_checks.items():
+            cb.setChecked(day in first_days if first_days else True)
+
+        self.ranges_table.setRowCount(0)
+        for time_range in schedule.get("time_ranges", []) or []:
+            self._append_time_range(time_range.get("start", "00:00"), time_range.get("end", "01:00"))
+
+        self.rate_value.setEnabled(self.has_rate.isChecked())
+        self.priority_value.setEnabled(self.use_priority.isChecked())
+
+    def _append_time_range(self, start: str, end: str):
+        row = self.ranges_table.rowCount()
+        self.ranges_table.insertRow(row)
+        self.ranges_table.setItem(row, 0, QTableWidgetItem(start))
+        self.ranges_table.setItem(row, 1, QTableWidgetItem(end))
+
+    def _add_time_range(self):
+        self._append_time_range("00:00", "01:00")
+
+    def _remove_time_ranges(self):
+        rows = sorted({item.row() for item in self.ranges_table.selectedItems()}, reverse=True)
+        for row in rows:
+            if 0 <= row < self.ranges_table.rowCount():
+                self.ranges_table.removeRow(row)
+
+    def validate(self) -> Optional[str]:
+        if self.ranges_table.rowCount() == 0:
+            return "Each rate needs at least one time range."
+        for row in range(self.ranges_table.rowCount()):
+            start_item = self.ranges_table.item(row, 0)
+            end_item = self.ranges_table.item(row, 1)
+            start_text = start_item.text().strip() if start_item else ""
+            end_text = end_item.text().strip() if end_item else ""
+            start = parse_hhmm(start_text)
+            end = parse_hhmm(end_text)
+            if start is None or end is None:
+                return "Time ranges must be in HH:MM format."
+            if start == end:
+                return "Time range end must be different from start."
+        return None
+
+    def get_rate(self) -> dict:
+        rate = copy.deepcopy(self._rate)
+        rate["rate_name"] = self.rate_name.text().strip() or rate.get("rate_name", "Rate")
+
+        if self.use_priority.isChecked():
+            rate["priority"] = int(self.priority_value.value())
+        else:
+            rate.pop("priority", None)
+
+        if self.has_rate.isChecked():
+            rate["rate_gbp_per_kwh"] = float(self.rate_value.value())
+        else:
+            rate["rate_gbp_per_kwh"] = None
+
+        days = [day for day, cb in self.day_checks.items() if cb.isChecked()]
+        if not days:
+            days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        day_sets = [{"days": days}] + self._extra_day_sets
+
+        time_ranges = []
+        for row in range(self.ranges_table.rowCount()):
+            start = self.ranges_table.item(row, 0).text().strip()
+            end = self.ranges_table.item(row, 1).text().strip()
+            time_ranges.append({"start": start, "end": end})
+
+        rate["schedule"] = {
+            "type": "weekly",
+            "day_sets": day_sets,
+            "time_ranges": time_ranges,
+        }
+        return rate
+
+
+class TariffEditorDialog(QDialog):
+    def __init__(self, parent=None, supplier_name: str = "", tariff: Optional[dict] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Tariff Editor")
+        self.setModal(True)
+        self._original_supplier_name = supplier_name
+        self._original_tariff = copy.deepcopy(tariff) if tariff else {}
+        self._rates: List[TariffRateEditor] = []
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.supplier_name = QLineEdit(supplier_name)
+        form.addRow("Supplier name", self.supplier_name)
+
+        self.tariff_name = QLineEdit(self._original_tariff.get("tariff_name", ""))
+        form.addRow("Tariff name", self.tariff_name)
+
+        self.complicated = QCheckBox("Complicated tariff")
+        self.complicated.setChecked(bool(self._original_tariff.get("complicated", False)))
+        form.addRow(self.complicated)
+
+        self.complication_notes = QLineEdit(self._original_tariff.get("complication_notes") or "")
+        form.addRow("Complication notes", self.complication_notes)
+
+        standing_row = QHBoxLayout()
+        self.has_standing = QCheckBox("Has standing charge")
+        self.standing_value = QDoubleSpinBox()
+        self.standing_value.setDecimals(4)
+        self.standing_value.setRange(0.0, 10.0)
+        self.standing_value.setSingleStep(0.01)
+        standing_row.addWidget(self.has_standing)
+        standing_row.addWidget(self.standing_value)
+        form.addRow("Standing charge (GBP/day)", standing_row)
+
+        layout.addLayout(form)
+
+        rates_group = QGroupBox("Rates")
+        rates_layout = QVBoxLayout(rates_group)
+        self.rates_container = QWidget()
+        self.rates_container_layout = QVBoxLayout(self.rates_container)
+        self.rates_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.rates_container_layout.setSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.rates_container)
+        rates_layout.addWidget(scroll)
+
+        btn_row = QHBoxLayout()
+        self.btn_add_rate = QPushButton("Add rate")
+        self.btn_del_rate = QPushButton("Remove last rate")
+        btn_row.addWidget(self.btn_add_rate)
+        btn_row.addWidget(self.btn_del_rate)
+        rates_layout.addLayout(btn_row)
+        layout.addWidget(rates_group)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.btn_add_rate.clicked.connect(self._add_rate)
+        self.btn_del_rate.clicked.connect(self._remove_rate)
+        self.has_standing.toggled.connect(self.standing_value.setEnabled)
+
+        self._load_tariff()
+
+    def _load_tariff(self):
+        standing = self._original_tariff.get("standing_charge_gbp_per_day")
+        if standing is None:
+            self.has_standing.setChecked(False)
+            self.standing_value.setValue(0.0)
+        else:
+            self.has_standing.setChecked(True)
+            self.standing_value.setValue(float(standing))
+        self.standing_value.setEnabled(self.has_standing.isChecked())
+
+        for rate in self._original_tariff.get("rates", []) or []:
+            self._append_rate(rate)
+
+    def _append_rate(self, rate: Optional[dict] = None):
+        widget = TariffRateEditor(rate)
+        self._rates.append(widget)
+        self.rates_container_layout.addWidget(widget)
+
+    def _add_rate(self):
+        self._append_rate({
+            "rate_name": "",
+            "rate_gbp_per_kwh": None,
+            "schedule": {
+                "type": "weekly",
+                "day_sets": [{"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}],
+                "time_ranges": [{"start": "00:00", "end": "01:00"}],
+            },
+        })
+
+    def _remove_rate(self):
+        if not self._rates:
+            return
+        widget = self._rates.pop()
+        widget.setParent(None)
+        widget.deleteLater()
+
+    def _on_accept(self):
+        error = self.validate()
+        if error:
+            QMessageBox.warning(self, "Invalid tariff", error)
+            return
+        self.accept()
+
+    def validate(self) -> Optional[str]:
+        if not self.supplier_name.text().strip():
+            return "Supplier name is required."
+        if not self.tariff_name.text().strip():
+            return "Tariff name is required."
+        if not self._rates:
+            return "Add at least one rate."
+        for rate_widget in self._rates:
+            err = rate_widget.validate()
+            if err:
+                return err
+        return None
+
+    def get_result(self) -> Tuple[str, dict, bool]:
+        supplier_name = self.supplier_name.text().strip()
+        tariff = copy.deepcopy(self._original_tariff)
+        tariff["tariff_name"] = self.tariff_name.text().strip()
+        tariff["complicated"] = self.complicated.isChecked()
+        notes = self.complication_notes.text().strip()
+        tariff["complication_notes"] = notes if notes else None
+        if self.has_standing.isChecked():
+            tariff["standing_charge_gbp_per_day"] = float(self.standing_value.value())
+        else:
+            tariff["standing_charge_gbp_per_day"] = None
+
+        tariff["rates"] = [rate_widget.get_rate() for rate_widget in self._rates]
+        dirty = json.dumps(tariff, sort_keys=True) != json.dumps(self._original_tariff, sort_keys=True)
+        supplier_dirty = supplier_name != self._original_supplier_name
+        return supplier_name, tariff, (dirty or supplier_dirty)
+
+
+class TariffSelectionDialog(QDialog):
+    def __init__(self, parent=None, documents: Optional[List[TariffDocument]] = None,
+                 current_doc: Optional[TariffDocument] = None, selected_entry: Optional[TariffEntry] = None,
+                 currency_symbol: str = "£"):
+        super().__init__(parent)
+        self.setWindowTitle("Select Tariff")
+        self.setModal(True)
+        self._documents = documents or []
+        self._current_doc = current_doc
+        self._entries: List[Optional[TariffEntry]] = []
+        self._selected_entry = selected_entry
+        self._currency_symbol = currency_symbol
+
+        layout = QVBoxLayout(self)
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Select", "Supplier", "Tariff", "Headline price"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        layout.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        self.btn_add = QPushButton("Add New…")
+        btn_row.addWidget(self.btn_add)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.table.itemChanged.connect(self._on_item_changed)
+        self.table.cellDoubleClicked.connect(self._on_double_click)
+        self.btn_add.clicked.connect(self._on_add_new)
+
+        self._refresh_table()
+
+    def _refresh_table(self):
+        self.table.blockSignals(True)
+        self._entries = []
+        rows: List[Tuple[str, str, str]] = []
+        rows.append(("Custom", "", "Use Settings"))
+        self._entries.append(None)
+
+        for doc in self._documents:
+            for supplier_index, supplier in enumerate(doc.data.get("suppliers", [])):
+                for tariff_index, tariff in enumerate(supplier.get("tariffs", [])):
+                    headline = tariff_headline(tariff, self._currency_symbol)
+                    rows.append((supplier.get("supplier_name", ""), tariff.get("tariff_name", ""), headline))
+                    self._entries.append(TariffEntry(doc, supplier_index, tariff_index))
+
+        self.table.setRowCount(len(rows))
+        for row_index, (supplier_name, tariff_name, headline) in enumerate(rows):
+            check_item = QTableWidgetItem("")
+            check_item.setFlags(check_item.flags() | Qt.ItemIsUserCheckable)
+            check_item.setFlags(check_item.flags() & ~Qt.ItemIsEditable)
+            check_state = Qt.Unchecked
+            entry = self._entries[row_index]
+            if entry is None and self._selected_entry is None:
+                check_state = Qt.Checked
+            elif entry is not None and self._selected_entry is not None:
+                if (entry.document == self._selected_entry.document
+                        and entry.supplier_index == self._selected_entry.supplier_index
+                        and entry.tariff_index == self._selected_entry.tariff_index):
+                    check_state = Qt.Checked
+            check_item.setCheckState(check_state)
+            self.table.setItem(row_index, 0, check_item)
+            self.table.setItem(row_index, 1, QTableWidgetItem(supplier_name))
+            self.table.setItem(row_index, 2, QTableWidgetItem(tariff_name))
+            self.table.setItem(row_index, 3, QTableWidgetItem(headline))
+
+        self.table.blockSignals(False)
+
+    def _on_item_changed(self, item: QTableWidgetItem):
+        if item.column() != 0:
+            return
+        if item.checkState() != Qt.Checked:
+            return
+        row = item.row()
+        self._select_row(row)
+
+    def _select_row(self, row: int):
+        self.table.blockSignals(True)
+        for i in range(self.table.rowCount()):
+            it = self.table.item(i, 0)
+            if not it:
+                continue
+            it.setCheckState(Qt.Checked if i == row else Qt.Unchecked)
+        self.table.blockSignals(False)
+
+    def _on_double_click(self, row: int, _column: int):
+        entry = self._entries[row]
+        if entry is None:
+            return
+        supplier = entry.supplier()
+        tariff = entry.tariff()
+        dlg = TariffEditorDialog(self, supplier.get("supplier_name", ""), tariff)
+        if dlg.exec() == QDialog.Accepted:
+            supplier_name, updated_tariff, dirty = dlg.get_result()
+            if dirty:
+                supplier["supplier_name"] = supplier_name
+                tariff.clear()
+                tariff.update(updated_tariff)
+                self._save_document(entry.document)
+                self._refresh_table()
+
+    def _on_add_new(self):
+        if not self._current_doc:
+            QMessageBox.information(self, "Add tariff", "Import a tariff file first.")
+            return
+        dlg = TariffEditorDialog(self, "", {
+            "tariff_id": "",
+            "tariff_name": "",
+            "market_segment": "domestic",
+            "availability": {
+                "countries": ["GB"],
+                "regions": ["all"],
+                "new_customers_only": False,
+                "smart_meter_required": False,
+                "payment_methods": [],
+                "exit_fees": False,
+                "contract_length_months": 0,
+            },
+            "usp_tags": [],
+            "complicated": False,
+            "complication_notes": None,
+            "pricing_model": "flat_or_tou",
+            "standing_charge_gbp_per_day": None,
+            "rates": [],
+            "export": {
+                "has_export_rate": False,
+                "export_notes": None,
+                "export_rates": [],
+            },
+            "effective": {
+                "start_date": None,
+                "end_date": None,
+            },
+            "source": {
+                "retrieved_at": "",
+                "source_urls": [],
+                "evidence_notes": "",
+            },
+        })
+        if dlg.exec() == QDialog.Accepted:
+            supplier_name, updated_tariff, dirty = dlg.get_result()
+            if not dirty:
+                return
+            self._add_new_tariff(self._current_doc, supplier_name, updated_tariff)
+            self._refresh_table()
+
+    def _add_new_tariff(self, doc: TariffDocument, supplier_name: str, tariff: dict):
+        suppliers = doc.data.setdefault("suppliers", [])
+        supplier = next((s for s in suppliers if s.get("supplier_name") == supplier_name), None)
+        is_new_supplier = supplier is None
+        if is_new_supplier:
+            supplier = {
+                "supplier_id": "",
+                "supplier_name": supplier_name,
+                "supplier_website": "",
+                "notes": [],
+                "tariffs": [],
+            }
+            suppliers.append(supplier)
+        if is_new_supplier:
+            supplier_id = supplier.get("supplier_id") or slugify(supplier_name) or "custom-supplier"
+            existing_ids = {s.get("supplier_id") for s in suppliers if s is not supplier}
+            if supplier_id in existing_ids:
+                suffix = 2
+                base = supplier_id
+                while f"{base}-{suffix}" in existing_ids:
+                    suffix += 1
+                supplier_id = f"{base}-{suffix}"
+            supplier["supplier_id"] = supplier_id
+
+        if not tariff.get("tariff_id"):
+            tariff_id = slugify(tariff.get("tariff_name", "")) or "custom-tariff"
+            existing_tariff_ids = {t.get("tariff_id") for t in supplier.get("tariffs", [])}
+            if tariff_id in existing_tariff_ids:
+                suffix = 2
+                base = tariff_id
+                while f"{base}-{suffix}" in existing_tariff_ids:
+                    suffix += 1
+                tariff_id = f"{base}-{suffix}"
+            tariff["tariff_id"] = tariff_id
+        supplier.setdefault("tariffs", []).append(tariff)
+        self._save_document(doc)
+
+    def _save_document(self, doc: TariffDocument):
+        try:
+            with open(doc.save_path, "w", encoding="utf-8") as f:
+                json.dump(doc.data, f, indent=2)
+        except Exception as ex:
+            QMessageBox.critical(self, "Save failed", f"Could not save:\n{ex}")
+
+    def _on_accept(self):
+        selected_row = None
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            if item and item.checkState() == Qt.Checked:
+                selected_row = row
+                break
+        if selected_row is None:
+            QMessageBox.warning(self, "Select tariff", "Select a tariff before continuing.")
+            return
+        self._selected_entry = self._entries[selected_row]
+        self.accept()
+
+    def get_selected_entry(self) -> Optional[TariffEntry]:
+        return self._selected_entry
 
 
 # =========================
@@ -1346,7 +2071,8 @@ class TimelineWidget(QWidget):
         label_width = self.left_label_w - self.label_pad * 2
         label_right = tr.left() - 4
         label_rect = QRect(label_right - label_width, tr.top(), label_width, tr.height())
-        p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignRight, "Tariff")
+        label = self.settings.tariff_label or "Tariff"
+        p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignRight, label)
 
     def _paint_axis(self, p: QPainter):
         tl = self._timeline_rect()
@@ -1751,6 +2477,9 @@ class MainWindow(QMainWindow):
 
         self.qs = QSettings("JumbleSaleOfStimuli", "PowerCostTimeline")
         self.settings_model = SettingsModel.from_qsettings(self.qs)
+        self.tariff_documents: List[TariffDocument] = []
+        self.current_tariff_doc: Optional[TariffDocument] = None
+        self.active_tariff_entry: Optional[TariffEntry] = None
 
         # project state
         self.project = Project(devices=[
@@ -1841,6 +2570,14 @@ class MainWindow(QMainWindow):
         timingm.addAction(act_custom_periods)
         act_custom_periods.triggered.connect(self.open_custom_periods)
 
+        tariffm = mb.addMenu("&Tariff")
+        act_import_tariff = QAction("Import…", self)
+        act_select_tariff = QAction("Select Tariff…", self)
+        tariffm.addAction(act_import_tariff)
+        tariffm.addAction(act_select_tariff)
+        act_import_tariff.triggered.connect(self.import_tariffs)
+        act_select_tariff.triggered.connect(self.select_tariff)
+
         helpm = mb.addMenu("&Help")
         act_about = QAction("About", self)
         helpm.addAction(act_about)
@@ -1930,6 +2667,54 @@ class MainWindow(QMainWindow):
             self.device_dialog = None
             self.refresh_tables()
             self.recompute()
+
+    # ---------------------
+    # Tariffs
+    # ---------------------
+
+    def import_tariffs(self):
+        dlg = TariffImportDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        path, append = dlg.get_result()
+        if not path:
+            return
+        try:
+            doc = load_tariff_document(path)
+        except Exception as ex:
+            QMessageBox.critical(self, "Import failed", f"Could not import:\n{ex}")
+            return
+        if not append:
+            self.tariff_documents = []
+        self.tariff_documents.append(doc)
+        self.current_tariff_doc = doc
+        QMessageBox.information(self, "Import complete", f"Loaded tariffs from:\n{path}")
+
+    def select_tariff(self):
+        dlg = TariffSelectionDialog(
+            self,
+            documents=self.tariff_documents,
+            current_doc=self.current_tariff_doc,
+            selected_entry=self.active_tariff_entry,
+            currency_symbol=self.settings_model.currency_symbol,
+        )
+        if dlg.exec() == QDialog.Accepted:
+            entry = dlg.get_selected_entry()
+            self.apply_tariff_selection(entry)
+
+    def apply_tariff_selection(self, entry: Optional[TariffEntry]):
+        self.active_tariff_entry = entry
+        if entry is None:
+            self.settings_model.tariff_minute_rates = None
+            self.settings_model.tariff_label = None
+        else:
+            tariff = entry.tariff()
+            supplier = entry.supplier()
+            self.settings_model.tariff_minute_rates = build_tariff_minute_rates(tariff)
+            supplier_name = supplier.get("supplier_name", "Supplier")
+            tariff_name = tariff.get("tariff_name", "Tariff")
+            self.settings_model.tariff_label = f"{supplier_name} — {tariff_name}"
+        self.recompute()
 
     # ---------------------
     # Tables <-> model sync
