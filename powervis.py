@@ -1128,6 +1128,7 @@ class TimelineWidget(QWidget):
         self.axis_h = 32
         self.label_pad = 12
         self.axis_top_pad = 10
+        self.axis_labels_rotated = False
 
         # interaction state
         self.hit = HitTest()
@@ -1151,6 +1152,8 @@ class TimelineWidget(QWidget):
         self.sim = sim
         self._update_visible_devices()
         self._update_left_label_width()
+        self._update_right_info_width()
+        self._update_axis_layout()
         self.updateGeometry()
         self.update()
 
@@ -1177,6 +1180,45 @@ class TimelineWidget(QWidget):
                 power_metrics.horizontalAdvance(f"{dev.power_w:g} W"),
             )
         self.left_label_w = max(160, widest + self.label_pad * 2)
+
+    def _update_right_info_width(self):
+        if not (self.project and self.settings and self.sim):
+            self.right_info_w = 240
+            return
+        metrics = QFontMetrics(self.info_font)
+        max_kwh = 0.0
+        max_cost = 0.0
+        for idx in self.visible_device_indices:
+            max_kwh = max(max_kwh, self.sim.per_device_kwh_day[idx])
+            max_cost = max(max_cost, self.sim.per_device_cost_day[idx])
+        kwh_text = f"▲ {max_kwh:.2f} kWh"
+        cost_text = f"▼ {self.settings.currency_symbol}{max_cost:.2f}"
+        text_width = max(
+            metrics.horizontalAdvance(kwh_text),
+            metrics.horizontalAdvance(cost_text),
+        )
+        diameter = max(6, self.row_h - 16)
+        info_inner_width = 4 + diameter + 10 + text_width + 4
+        self.right_info_w = max(180, info_inner_width + 12)
+
+    def _update_axis_layout(self):
+        if not self.project:
+            self.axis_labels_rotated = False
+            self.axis_h = 32
+            return
+        tl = self._timeline_rect()
+        tick_spacing = max(1, tl.width() / 24)
+        metrics = QFontMetrics(self.font)
+        label_width = metrics.horizontalAdvance("00:00")
+        needs_rotation = label_width + 4 > tick_spacing
+        if needs_rotation:
+            angle = math.radians(45)
+            label_height = metrics.height()
+            rot_height = abs(label_width * math.sin(angle)) + abs(label_height * math.cos(angle))
+            self.axis_h = max(32, int(rot_height) + 22)
+        else:
+            self.axis_h = 32
+        self.axis_labels_rotated = needs_rotation
 
     def sizeHint(self):
         if not self.project:
@@ -1237,6 +1279,10 @@ class TimelineWidget(QWidget):
         for row_index, dev_index in enumerate(self.visible_device_indices):
             dev = self.project.devices[dev_index]
             self._paint_row(p, row_index, dev_index, dev)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_axis_layout()
 
     def _paint_tariff(self, p: QPainter):
         tr = self._tariff_rect()
@@ -1307,7 +1353,16 @@ class TimelineWidget(QWidget):
             x = self._minute_to_x(m)
             p.drawLine(x, axis_y + 10, x, axis_y + 20)
             if hour < 24:
-                p.drawText(x + 2, axis_y + 9, f"{hour:02d}:00")
+                label = f"{hour:02d}:00"
+                if self.axis_labels_rotated:
+                    metrics = QFontMetrics(self.font)
+                    p.save()
+                    p.translate(x + 2, axis_y + 10)
+                    p.rotate(-45)
+                    p.drawText(0, metrics.ascent(), label)
+                    p.restore()
+                else:
+                    p.drawText(x + 2, axis_y + 9, label)
 
         # axis baseline
         p.setPen(QColor(90, 90, 100))
