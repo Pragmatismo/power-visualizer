@@ -30,6 +30,14 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
+def is_minute_in_window(minute: int, start_min: int, end_min: int) -> bool:
+    if start_min == end_min:
+        return False
+    if start_min < end_min:
+        return start_min <= minute < end_min
+    return minute >= start_min or minute < end_min
+
+
 def time_to_minutes(hhmm: str) -> int:
     # "HH:MM"
     try:
@@ -261,10 +269,27 @@ def tariff_rate_for_minute(settings: SettingsModel, minute: int) -> float:
     """Return £/kWh rate for the minute (base schedule only)."""
     if not settings.use_time_of_day:
         return settings.base_rate_flat
-    # offpeak window can be any range; for MVP we keep it simple and assume no wrap
-    if settings.offpeak_start_min <= minute < settings.offpeak_end_min:
+    if is_minute_in_window(minute, settings.offpeak_start_min, settings.offpeak_end_min):
         return settings.offpeak_rate
     return settings.base_rate_flat
+
+
+def tariff_segments(settings: SettingsModel) -> List[Tuple[int, int, float]]:
+    if not settings.use_time_of_day:
+        return [(0, MINUTES_PER_DAY, settings.base_rate_flat)]
+    segments: List[Tuple[int, int, float]] = []
+    current_rate = tariff_rate_for_minute(settings, 0)
+    start = 0
+    for minute in range(1, MINUTES_PER_DAY + 1):
+        if minute == MINUTES_PER_DAY:
+            next_rate = None
+        else:
+            next_rate = tariff_rate_for_minute(settings, minute)
+        if minute == MINUTES_PER_DAY or next_rate != current_rate:
+            segments.append((start, minute, current_rate))
+            start = minute
+            current_rate = next_rate
+    return segments
 
 
 def is_free_this_minute(settings: SettingsModel, minute: int, total_kw: float) -> bool:
@@ -617,6 +642,16 @@ class TimelineWidget(QWidget):
             p.setBrush(col)
             p.drawRect(QRect(x0, tr.top(), x1 - x0, tr.height()))
 
+        segment_label = f"{self.settings.currency_symbol}{{rate:.2f}}/kWh"
+        for start_min, end_min, rate in tariff_segments(self.settings):
+            x0 = self._minute_to_x(start_min)
+            x1 = self._minute_to_x(end_min)
+            if x1 - x0 < 40:
+                continue
+            label_rect = QRect(x0 + 4, tr.top(), x1 - x0 - 8, tr.height())
+            p.setPen(QColor(240, 240, 240))
+            p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, segment_label.format(rate=rate))
+
         # free overlay
         fr = self.settings.free_rule.normalized()
         if fr.enabled:
@@ -634,7 +669,8 @@ class TimelineWidget(QWidget):
         p.setBrush(Qt.NoBrush)
         p.drawRect(tr)
         p.setPen(QColor(220, 220, 230))
-        p.drawText(6, tr.bottom() + 16, "Tariff (visual only — edit in Settings)")
+        label_rect = QRect(tr.right() + 8, tr.top(), self.right_info_w - 16, tr.height())
+        p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignLeft, "Tariff")
 
     def _paint_axis(self, p: QPainter):
         tl = self._timeline_rect()
