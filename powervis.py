@@ -1125,8 +1125,9 @@ class TimelineWidget(QWidget):
         self.top_tariff_h = 56
         self.row_h = 44
         self.row_gap = 6
-        self.axis_h = 22
+        self.axis_h = 32
         self.label_pad = 12
+        self.axis_top_pad = 10
 
         # interaction state
         self.hit = HitTest()
@@ -1141,6 +1142,7 @@ class TimelineWidget(QWidget):
         self.tariff_font = QFont("Sans", 15)
         self.name_font = QFont("Sans", 10, QFont.DemiBold)
         self.power_font = QFont("Sans", 9)
+        self.info_font = QFont("Sans", 11)
         self.setMinimumHeight(400)
 
     def set_data(self, project: Project, settings: SettingsModel, sim: SimResult):
@@ -1297,7 +1299,7 @@ class TimelineWidget(QWidget):
 
     def _paint_axis(self, p: QPainter):
         tl = self._timeline_rect()
-        axis_y = self.top_tariff_h + 4
+        axis_y = self.top_tariff_h + self.axis_top_pad
         p.setPen(QColor(160, 160, 170))
         # hour ticks
         for hour in range(25):
@@ -1372,11 +1374,39 @@ class TimelineWidget(QWidget):
         on_min = self.sim.per_device_on_minutes[dev_index] if self.sim else 0
         kwh = self.sim.per_device_kwh_day[dev_index] if self.sim else 0.0
         cost = self.sim.per_device_cost_day[dev_index] if self.sim else 0.0
-        p.setPen(QColor(220, 220, 230))
-        p.drawText(
-            info, Qt.AlignVCenter | Qt.AlignLeft,
-            f"On: {on_min/60:.2f} h/day\nEnergy: {kwh:.3f} kWh/day\nCost: {self.settings.currency_symbol}{cost:.2f}/day"
+        bar_height = rr.height() - 16
+        diameter = max(6, min(bar_height, info.height() - 8))
+        circle_rect = QRect(
+            info.left() + 4,
+            info.top() + (info.height() - diameter) // 2,
+            diameter,
+            diameter,
         )
+        on_ratio = clamp(on_min / MINUTES_PER_DAY, 0.0, 1.0)
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(200, 70, 70))
+        p.drawEllipse(circle_rect)
+        p.setBrush(QColor(80, 180, 90))
+        on_span = int(on_ratio * 360 * 16)
+        p.drawPie(circle_rect, 90 * 16, -on_span)
+        p.restore()
+
+        text_x = circle_rect.right() + 10
+        text_rect = QRect(text_x, info.top(), info.right() - text_x, info.height())
+        p.setPen(QColor(220, 220, 230))
+        p.setFont(self.info_font)
+        metrics = QFontMetrics(self.info_font)
+        line_h = metrics.height()
+        total_h = line_h * 2
+        start_y = text_rect.top() + (text_rect.height() - total_h) // 2
+        kwh_text = f"{kwh:.2f} kWh"
+        cost_text = f"{self.settings.currency_symbol}{cost:.2f}"
+        p.drawText(QRect(text_rect.left(), start_y, text_rect.width(), line_h),
+                   Qt.AlignLeft | Qt.AlignVCenter, f"▲ {kwh_text}")
+        p.drawText(QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
+                   Qt.AlignLeft | Qt.AlignVCenter, f"▼ {cost_text}")
 
     def _draw_block(self, p: QPainter, rr: QRect, start_min: int, end_min: int, color: QColor, hover: bool):
         x0 = self._minute_to_x(start_min)
