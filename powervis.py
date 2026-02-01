@@ -69,6 +69,13 @@ def format_duration_minutes(m: int) -> str:
     return f"{hh:d}:{mm:02d}"
 
 
+def format_duration_hhmm(m: int) -> str:
+    m = clamp(int(m), 1, MINUTES_PER_DAY)
+    hh = m // 60
+    mm = m % 60
+    return f"{hh:02d}:{mm:02d}"
+
+
 def parse_duration_text(text: str) -> Optional[int]:
     cleaned = text.strip()
     if not cleaned:
@@ -2141,7 +2148,16 @@ class TimelineWidget(QWidget):
                     and self.hover_hit.device_index == dev_index
                     and self.hover_hit.item_index == j
                 )
-                self._draw_block(p, rr, ivn.start_min, ivn.end_min, QColor(100, 170, 240, 190), hover=hover)
+                duration_text = format_duration_hhmm(ivn.end_min - ivn.start_min)
+                self._draw_block(
+                    p,
+                    rr,
+                    ivn.start_min,
+                    ivn.end_min,
+                    QColor(100, 170, 240, 190),
+                    hover=hover,
+                    label_text=duration_text,
+                )
 
         elif dev.dtype == DeviceType.EVENTS:
             for j, ev in enumerate(dev.events):
@@ -2197,7 +2213,16 @@ class TimelineWidget(QWidget):
         p.drawText(QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
                    Qt.AlignLeft | Qt.AlignVCenter, f"▼ {cost_text}")
 
-    def _draw_block(self, p: QPainter, rr: QRect, start_min: int, end_min: int, color: QColor, hover: bool):
+    def _draw_block(
+        self,
+        p: QPainter,
+        rr: QRect,
+        start_min: int,
+        end_min: int,
+        color: QColor,
+        hover: bool,
+        label_text: Optional[str] = None,
+    ):
         x0 = self._minute_to_x(start_min)
         x1 = self._minute_to_x(end_min)
         rect = QRect(x0, rr.top() + 8, max(2, x1 - x0), rr.height() - 16)
@@ -2211,6 +2236,16 @@ class TimelineWidget(QWidget):
         p.setBrush(QColor(0, 0, 0, 90))
         p.drawRect(QRect(rect.left(), rect.top(), 4, rect.height()))
         p.drawRect(QRect(rect.right() - 3, rect.top(), 4, rect.height()))
+        if label_text:
+            metrics = QFontMetrics(self.font)
+            text_width = metrics.horizontalAdvance(label_text)
+            if text_width + 8 <= rect.width():
+                p.save()
+                p.setFont(self.font)
+                p.setPen(QColor(240, 240, 245))
+                text_rect = QRect(rect.left() + 4, rect.top(), rect.width() - 8, rect.height())
+                p.drawText(text_rect, Qt.AlignCenter, label_text)
+                p.restore()
 
     def _draw_event(self, p: QPainter, rr: QRect, start_min: int, duration_min: int, color: QColor, hover: bool):
         x0 = self._minute_to_x(start_min)
