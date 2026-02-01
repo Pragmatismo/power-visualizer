@@ -355,6 +355,7 @@ class SettingsModel:
     # Optional imported tariff schedule
     tariff_minute_rates: Optional[List[float]] = None
     tariff_label: Optional[str] = None
+    show_standing_charge: bool = False
 
     def clone(self) -> "SettingsModel":
         return SettingsModel(
@@ -374,6 +375,7 @@ class SettingsModel:
             ),
             tariff_minute_rates=list(self.tariff_minute_rates) if self.tariff_minute_rates else None,
             tariff_label=self.tariff_label,
+            show_standing_charge=self.show_standing_charge,
         )
 
     def to_qsettings(self, qs: QSettings):
@@ -392,6 +394,7 @@ class SettingsModel:
         qs.setValue("free_start_min", self.free_rule.start_min)
         qs.setValue("free_end_min", self.free_rule.end_min)
         qs.setValue("free_kw_threshold", self.free_rule.free_kw_threshold)
+        qs.setValue("show_standing_charge", self.show_standing_charge)
 
         qs.setValue("has_run_before", True)
 
@@ -416,6 +419,9 @@ class SettingsModel:
             free_kw_threshold=float(qs.value("free_kw_threshold", sm.free_rule.free_kw_threshold)),
         ).normalized()
         sm.free_rule = fr
+        sm.show_standing_charge = (
+            str(qs.value("show_standing_charge", sm.show_standing_charge)).lower() == "true"
+        )
         # enforce the constraints you chose
         sm.month_days = 30
         sm.step_minutes = 1
@@ -2781,8 +2787,14 @@ class MainWindow(QMainWindow):
         act_select_tariff = QAction("Select Tariff…", self)
         tariffm.addAction(act_import_tariff)
         tariffm.addAction(act_select_tariff)
+        tariffm.addSeparator()
+        act_show_standing = QAction("Show Standing Charge", self)
+        act_show_standing.setCheckable(True)
+        act_show_standing.setChecked(self.settings_model.show_standing_charge)
+        tariffm.addAction(act_show_standing)
         act_import_tariff.triggered.connect(self.import_tariffs)
         act_select_tariff.triggered.connect(self.select_tariff)
+        act_show_standing.toggled.connect(self._toggle_standing_charge)
 
         helpm = mb.addMenu("&Help")
         act_about = QAction("About", self)
@@ -3016,41 +3028,96 @@ class MainWindow(QMainWindow):
         year_kwh = day_kwh * 365
         year_cost = day_cost * 365
 
-        rows = []
+        show_standing = self.settings_model.show_standing_charge
+        standing_charge = None
+        if show_standing and self.active_tariff_entry is not None:
+            tariff = self.active_tariff_entry.tariff()
+            standing_charge = tariff.get("standing_charge_gbp_per_day")
+            if standing_charge is not None:
+                standing_charge = float(standing_charge)
+        has_standing = standing_charge is not None and standing_charge > 0
 
-        def add_row(label: str, kwh: str, cost: str) -> None:
-            rows.append(
-                "<tr>"
-                f"<td style='padding-right: 18px; white-space: nowrap;'>{escape(label)}</td>"
-                f"<td style='padding-right: 18px; text-align: right; white-space: nowrap;'>{escape(kwh)}</td>"
-                f"<td style='text-align: right; white-space: nowrap;'>{escape(cost)}</td>"
-                "</tr>"
-            )
+        data_rows = []
 
-        add_row("Day", f"{day_kwh:.3f} kWh", f"{cs}{day_cost:.2f}")
-        add_row("Week", f"{week_kwh:.3f} kWh", f"{cs}{week_cost:.2f}")
-        add_row("Month", f"{month_kwh:.3f} kWh", f"{cs}{month_cost:.2f}")
-        add_row("Year", f"{year_kwh:.3f} kWh", f"{cs}{year_cost:.2f}")
-        rows.append("<tr><td colspan='3' style='height: 8px;'></td></tr>")
+        def add_data_row(label: str, kwh: str, cost: str, days: float) -> None:
+            data_rows.append((label, kwh, cost, days))
+
+        add_data_row("Day", f"{day_kwh:.3f} kWh", f"{cs}{day_cost:.2f}", 1.0)
+        add_data_row("Week", f"{week_kwh:.3f} kWh", f"{cs}{week_cost:.2f}", 7.0)
+        add_data_row("Month", f"{month_kwh:.3f} kWh", f"{cs}{month_cost:.2f}", 30.0)
+        add_data_row("Year", f"{year_kwh:.3f} kWh", f"{cs}{year_cost:.2f}", 365.0)
 
         enabled_periods = [cp for cp in self.project.custom_periods if cp.enabled]
-        if not enabled_periods:
-            rows.append(
-                "<tr>"
-                "<td colspan='3' style='color: #b6b6bf; padding-left: 2px;'>"
-                "No custom periods enabled"
-                "</td>"
-                "</tr>"
-            )
         for period in enabled_periods:
             try:
                 d = custom_period_to_days(period, self.settings_model)
             except Exception:
                 d = 1.0
-            add_row(
+            add_data_row(
                 f"{period.name} ({period.duration:g} {period.unit})",
                 f"{day_kwh*d:.3f} kWh",
                 f"{cs}{day_cost*d:.2f}",
+                d,
+            )
+
+        rows = []
+        if show_standing:
+            rows.append(
+                "<tr>"
+                "<th style='text-align: left; padding-right: 18px; font-weight: normal;'>Period</th>"
+                "<th style='text-align: right; padding-right: 18px; font-weight: normal;'>Usage</th>"
+                "<th style='text-align: right; padding-right: 18px; font-weight: normal;'>Cost</th>"
+                "<th style='text-align: right; padding-right: 18px; font-weight: normal;'>Standing Charge</th>"
+                "<th style='text-align: right; font-weight: normal;'>Total</th>"
+                "</tr>"
+            )
+        else:
+            rows.append(
+                "<tr>"
+                "<th style='text-align: left; padding-right: 18px; font-weight: normal;'>Period</th>"
+                "<th style='text-align: right; padding-right: 18px; font-weight: normal;'>Usage</th>"
+                "<th style='text-align: right; font-weight: normal;'>Cost</th>"
+                "</tr>"
+            )
+
+        no_standing_rowspan = len(data_rows) if data_rows else 1
+        for row_index, (label, kwh, cost, days) in enumerate(data_rows):
+            row_html = (
+                "<tr>"
+                f"<td style='padding-right: 18px; white-space: nowrap;'>{escape(label)}</td>"
+                f"<td style='padding-right: 18px; text-align: right; white-space: nowrap;'>{escape(kwh)}</td>"
+                f"<td style='text-align: right; white-space: nowrap; padding-right: 18px;'>{escape(cost)}</td>"
+            )
+            if show_standing:
+                if has_standing:
+                    standing_cost = standing_charge * days
+                    total_cost = (day_cost * days) + standing_cost
+                    row_html += (
+                        f"<td style='text-align: right; white-space: nowrap; padding-right: 18px;'>"
+                        f"{cs}{standing_cost:.2f}</td>"
+                        f"<td style='text-align: right; white-space: nowrap;'>{cs}{total_cost:.2f}</td>"
+                    )
+                elif row_index == 0:
+                    row_html += (
+                        f"<td colspan='2' rowspan='{no_standing_rowspan}' "
+                        "style='text-align: center; vertical-align: middle; color: #b6b6bf;'>"
+                        "No Standing Charge</td>"
+                    )
+            row_html += "</tr>"
+            rows.append(row_html)
+
+        rows.append(
+            f"<tr><td colspan='{5 if show_standing else 3}' style='height: 8px;'></td></tr>"
+        )
+
+        if not enabled_periods:
+            rows.append(
+                "<tr>"
+                f"<td colspan='{5 if show_standing else 3}' "
+                "style='color: #b6b6bf; padding-left: 2px;'>"
+                "No custom periods enabled"
+                "</td>"
+                "</tr>"
             )
 
         html = (
@@ -3059,6 +3126,11 @@ class MainWindow(QMainWindow):
             + "</table>"
         )
         self.summary.setText(html)
+
+    def _toggle_standing_charge(self, enabled: bool):
+        self.settings_model.show_standing_charge = enabled
+        self.settings_model.to_qsettings(self.qs)
+        self.recompute()
 
 
 # =========================
