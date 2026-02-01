@@ -161,7 +161,6 @@ class SettingsModel:
     # Optional time-of-day schedule
     use_time_of_day: bool = False
     offpeak_rate: float = 0.22
-    peak_rate: float = 0.34
     offpeak_start_min: int = 0
     offpeak_end_min: int = 7 * 60
 
@@ -177,7 +176,6 @@ class SettingsModel:
 
         qs.setValue("use_time_of_day", self.use_time_of_day)
         qs.setValue("offpeak_rate", self.offpeak_rate)
-        qs.setValue("peak_rate", self.peak_rate)
         qs.setValue("offpeak_start_min", self.offpeak_start_min)
         qs.setValue("offpeak_end_min", self.offpeak_end_min)
 
@@ -199,7 +197,6 @@ class SettingsModel:
 
         sm.use_time_of_day = (str(qs.value("use_time_of_day", sm.use_time_of_day)).lower() == "true")
         sm.offpeak_rate = float(qs.value("offpeak_rate", sm.offpeak_rate))
-        sm.peak_rate = float(qs.value("peak_rate", sm.peak_rate))
         sm.offpeak_start_min = int(qs.value("offpeak_start_min", sm.offpeak_start_min))
         sm.offpeak_end_min = int(qs.value("offpeak_end_min", sm.offpeak_end_min))
 
@@ -267,7 +264,7 @@ def tariff_rate_for_minute(settings: SettingsModel, minute: int) -> float:
     # offpeak window can be any range; for MVP we keep it simple and assume no wrap
     if settings.offpeak_start_min <= minute < settings.offpeak_end_min:
         return settings.offpeak_rate
-    return settings.peak_rate
+    return settings.base_rate_flat
 
 
 def is_free_this_minute(settings: SettingsModel, minute: int, total_kw: float) -> bool:
@@ -386,57 +383,37 @@ class SettingsDialog(QDialog):
         self.currency_symbol.setMaxLength(4)
         form.addRow("Currency symbol", self.currency_symbol)
 
-        # month_days and step_minutes are fixed by your decisions but shown (read-only)
-        self.step_minutes = QSpinBox()
-        self.step_minutes.setRange(1, 60)
-        self.step_minutes.setValue(1)
-        self.step_minutes.setEnabled(False)
-        form.addRow("Simulation step (minutes)", self.step_minutes)
-
-        self.month_days = QSpinBox()
-        self.month_days.setRange(28, 31)
-        self.month_days.setValue(30)
-        self.month_days.setEnabled(False)
-        form.addRow("Month length (days)", self.month_days)
-
         # Tariff group
         tariff_group = QGroupBox("Electricity tariff")
         tariff_layout = QFormLayout(tariff_group)
-
-        self.use_tod = QCheckBox("Use time-of-day peak/off-peak")
-        self.use_tod.setChecked(self.model.use_time_of_day)
-        tariff_layout.addRow(self.use_tod)
 
         self.flat_rate = QDoubleSpinBox()
         self.flat_rate.setDecimals(4)
         self.flat_rate.setRange(0.0, 10.0)
         self.flat_rate.setSingleStep(0.01)
         self.flat_rate.setValue(self.model.base_rate_flat)
-        tariff_layout.addRow("Flat rate (£/kWh)", self.flat_rate)
+        tariff_layout.addRow("Price per kWh", self.flat_rate)
+
+        self.use_tod = QCheckBox("Off peak rate")
+        self.use_tod.setChecked(self.model.use_time_of_day)
+        tariff_layout.addRow(self.use_tod)
 
         self.offpeak_rate = QDoubleSpinBox()
         self.offpeak_rate.setDecimals(4)
         self.offpeak_rate.setRange(0.0, 10.0)
         self.offpeak_rate.setSingleStep(0.01)
         self.offpeak_rate.setValue(self.model.offpeak_rate)
-        tariff_layout.addRow("Off-peak rate (£/kWh)", self.offpeak_rate)
-
-        self.peak_rate = QDoubleSpinBox()
-        self.peak_rate.setDecimals(4)
-        self.peak_rate.setRange(0.0, 10.0)
-        self.peak_rate.setSingleStep(0.01)
-        self.peak_rate.setValue(self.model.peak_rate)
-        tariff_layout.addRow("Peak rate (£/kWh)", self.peak_rate)
+        tariff_layout.addRow("Off peak rate", self.offpeak_rate)
 
         self.offpeak_start = QSpinBox()
         self.offpeak_start.setRange(0, 23)
         self.offpeak_start.setValue(self.model.offpeak_start_min // 60)
-        tariff_layout.addRow("Off-peak start (hour)", self.offpeak_start)
+        tariff_layout.addRow("Off peak start", self.offpeak_start)
 
         self.offpeak_end = QSpinBox()
         self.offpeak_end.setRange(1, 24)
         self.offpeak_end.setValue(max(1, self.model.offpeak_end_min // 60))
-        tariff_layout.addRow("Off-peak end (hour)", self.offpeak_end)
+        tariff_layout.addRow("Off peak end", self.offpeak_end)
 
         # Free window (solar-ish)
         free_group = QGroupBox("Free window (solar simulation)")
@@ -478,10 +455,9 @@ class SettingsDialog(QDialog):
     def _update_enabled(self):
         tod = self.use_tod.isChecked()
         self.offpeak_rate.setEnabled(tod)
-        self.peak_rate.setEnabled(tod)
         self.offpeak_start.setEnabled(tod)
         self.offpeak_end.setEnabled(tod)
-        self.flat_rate.setEnabled(not tod)
+        self.flat_rate.setEnabled(True)
 
     def get_model(self) -> SettingsModel:
         m = SettingsModel.from_qsettings(QSettings())  # start from current persisted defaults
@@ -492,7 +468,6 @@ class SettingsDialog(QDialog):
         m.use_time_of_day = self.use_tod.isChecked()
         m.base_rate_flat = float(self.flat_rate.value())
         m.offpeak_rate = float(self.offpeak_rate.value())
-        m.peak_rate = float(self.peak_rate.value())
         m.offpeak_start_min = int(self.offpeak_start.value()) * 60
         m.offpeak_end_min = int(self.offpeak_end.value()) * 60
 
