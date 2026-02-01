@@ -1128,7 +1128,10 @@ class TimelineWidget(QWidget):
         self.axis_h = 32
         self.label_pad = 12
         self.axis_top_pad = 10
+        self.axis_bottom_pad = 6
+        self.axis_label_padding = 4
         self.axis_labels_rotated = False
+        self.axis_label_rot_height = 0
 
         # interaction state
         self.hit = HitTest()
@@ -1210,14 +1213,16 @@ class TimelineWidget(QWidget):
         tick_spacing = max(1, tl.width() / 24)
         metrics = QFontMetrics(self.font)
         label_width = metrics.horizontalAdvance("00:00")
-        needs_rotation = label_width + 4 > tick_spacing
+        label_height = metrics.height()
+        needs_rotation = label_width + self.axis_label_padding > tick_spacing
         if needs_rotation:
             angle = math.radians(45)
-            label_height = metrics.height()
             rot_height = abs(label_width * math.sin(angle)) + abs(label_height * math.cos(angle))
-            self.axis_h = max(32, int(rot_height) + 22)
+            self.axis_label_rot_height = int(rot_height)
+            self.axis_h = max(32, int(rot_height) + self.axis_top_pad + self.axis_bottom_pad)
         else:
-            self.axis_h = 32
+            self.axis_label_rot_height = label_height
+            self.axis_h = max(32, label_height + self.axis_top_pad + self.axis_bottom_pad)
         self.axis_labels_rotated = needs_rotation
 
     def sizeHint(self):
@@ -1345,28 +1350,31 @@ class TimelineWidget(QWidget):
 
     def _paint_axis(self, p: QPainter):
         tl = self._timeline_rect()
-        axis_y = self.top_tariff_h + self.axis_top_pad
+        axis_top = self.top_tariff_h
+        axis_baseline = axis_top + self.axis_h - self.axis_bottom_pad + 2
+        tick_top = axis_baseline - 10
+        label_bottom = axis_baseline - 2
+        metrics = QFontMetrics(self.font)
         p.setPen(QColor(160, 160, 170))
         # hour ticks
         for hour in range(25):
             m = hour * 60
             x = self._minute_to_x(m)
-            p.drawLine(x, axis_y + 10, x, axis_y + 20)
+            p.drawLine(x, tick_top, x, axis_baseline)
             if hour < 24:
                 label = f"{hour:02d}:00"
                 if self.axis_labels_rotated:
-                    metrics = QFontMetrics(self.font)
                     p.save()
-                    p.translate(x + 2, axis_y + 10)
+                    p.translate(x + 2, label_bottom - self.axis_label_rot_height)
                     p.rotate(-45)
                     p.drawText(0, metrics.ascent(), label)
                     p.restore()
                 else:
-                    p.drawText(x + 2, axis_y + 9, label)
+                    p.drawText(x + 2, label_bottom - metrics.descent(), label)
 
         # axis baseline
         p.setPen(QColor(90, 90, 100))
-        p.drawLine(tl.left(), axis_y + 20, tl.right(), axis_y + 20)
+        p.drawLine(tl.left(), axis_baseline, tl.right(), axis_baseline)
 
     def _paint_row(self, p: QPainter, row_index: int, dev_index: int, dev: Device):
         rr = self._row_rect(row_index)
