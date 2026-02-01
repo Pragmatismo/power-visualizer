@@ -13,7 +13,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
+    QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QFileDialog, QMessageBox, QComboBox, QSpinBox, QDoubleSpinBox,
     QDialog, QFormLayout, QDialogButtonBox, QGroupBox, QCheckBox,
     QLineEdit, QHeaderView, QListWidget, QListWidgetItem
@@ -60,6 +60,41 @@ def minutes_to_time(m: int) -> str:
     return f"{hh:02d}:{mm:02d}"
 
 
+def format_duration_minutes(m: int) -> str:
+    m = clamp(int(m), 1, MINUTES_PER_DAY)
+    hh = m // 60
+    mm = m % 60
+    return f"{hh:d}:{mm:02d}"
+
+
+def parse_duration_text(text: str) -> Optional[int]:
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    try:
+        if ":" in cleaned:
+            parts = cleaned.split(":")
+            if len(parts) != 2:
+                return None
+            hours = int(parts[0]) if parts[0] else 0
+            minutes = int(parts[1]) if parts[1] else 0
+            if minutes < 0:
+                return None
+            hours += minutes // 60
+            minutes = minutes % 60
+            total = hours * 60 + minutes
+        else:
+            hours = float(cleaned)
+            if hours < 0:
+                return None
+            total = int(hours * 60)
+        if total >= MINUTES_PER_DAY:
+            return MINUTES_PER_DAY
+        return max(1, total)
+    except Exception:
+        return None
+
+
 @dataclass
 class Interval:
     start_min: int
@@ -99,6 +134,9 @@ class Device:
     name: str = "New device"
     dtype: str = DeviceType.SCHEDULED
     power_w: float = 20.0
+    enabled: bool = True
+    default_duration_min: int = 30
+    variable: bool = True
 
     intervals: List[Interval] = field(default_factory=list)  # for scheduled
     events: List[Event] = field(default_factory=list)        # for per-use
@@ -108,9 +146,19 @@ class Device:
             "name": self.name,
             "dtype": self.dtype,
             "power_w": self.power_w,
+            "enabled": self.enabled,
+            "default_duration_min": self.default_duration_min,
+            "variable": self.variable,
             "intervals": [asdict(i) for i in self.intervals],
             "events": [asdict(e) for e in self.events],
         }
+
+    def apply_usage_settings(self):
+        self.default_duration_min = clamp(int(self.default_duration_min), 1, MINUTES_PER_DAY)
+        if self.default_duration_min >= MINUTES_PER_DAY:
+            self.dtype = DeviceType.ALWAYS
+            return
+        self.dtype = DeviceType.SCHEDULED if self.variable else DeviceType.EVENTS
 
     @staticmethod
     def from_dict(d: dict) -> "Device":
@@ -119,8 +167,23 @@ class Device:
             dtype=d.get("dtype", DeviceType.SCHEDULED),
             power_w=float(d.get("power_w", 20.0)),
         )
+        dev.enabled = parse_bool(d.get("enabled", True))
+        dev.variable = parse_bool(d.get("variable", dev.variable))
+        if "default_duration_min" in d:
+            dev.default_duration_min = int(d.get("default_duration_min", dev.default_duration_min))
+        else:
+            if dev.dtype == DeviceType.ALWAYS:
+                dev.default_duration_min = MINUTES_PER_DAY
+                dev.variable = False
+            elif dev.dtype == DeviceType.EVENTS:
+                dev.default_duration_min = 3
+                dev.variable = False
+            else:
+                dev.default_duration_min = 30
+                dev.variable = True
         dev.intervals = [Interval(**i).normalized() for i in d.get("intervals", [])]
         dev.events = [Event(**e).normalized() for e in d.get("events", [])]
+        dev.apply_usage_settings()
         return dev
 
 
@@ -342,6 +405,8 @@ def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
 
     # Build per-device minute power
     for i, dev in enumerate(project.devices):
+        if not dev.enabled:
+            continue
         base_power_w = max(0.0, float(dev.power_w))
 
         if dev.dtype == DeviceType.ALWAYS:
@@ -691,6 +756,181 @@ class CustomPeriodsDialog(QDialog):
 
 
 # =========================
+# Devices dialog
+# =========================
+
+class DeviceListDialog(QDialog):
+    def __init__(self, parent=None, project: Optional[Project] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Device List")
+        self.setModal(True)
+        self.project = project
+
+        layout = QVBoxLayout(self)
+
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels([
+            "Show",
+            "Name",
+            "Power (W)",
+            "Usage duration (H:M)",
+            "Variable",
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed | QTableWidget.SelectedClicked)
+        layout.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        self.btn_add = QPushButton("Add device")
+        self.btn_remove = QPushButton("Remove device")
+        self.btn_duplicate = QPushButton("Duplicate selected")
+        btn_row.addWidget(self.btn_add)
+        btn_row.addWidget(self.btn_remove)
+        btn_row.addWidget(self.btn_duplicate)
+        layout.addLayout(btn_row)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
+
+        self.table.itemChanged.connect(self._on_item_changed)
+        self.btn_add.clicked.connect(self._add_device)
+        self.btn_remove.clicked.connect(self._remove_selected)
+        self.btn_duplicate.clicked.connect(self._duplicate_selected)
+
+        self.refresh_table()
+
+    def refresh_table(self):
+        if not self.project:
+            return
+        self.table.blockSignals(True)
+        self.table.setRowCount(len(self.project.devices))
+        for row, dev in enumerate(self.project.devices):
+            enabled_item = QTableWidgetItem("")
+            enabled_item.setFlags(enabled_item.flags() | Qt.ItemIsUserCheckable)
+            enabled_item.setFlags(enabled_item.flags() & ~Qt.ItemIsEditable)
+            enabled_item.setCheckState(Qt.Checked if dev.enabled else Qt.Unchecked)
+            self.table.setItem(row, 0, enabled_item)
+
+            name_item = QTableWidgetItem(dev.name)
+            self.table.setItem(row, 1, name_item)
+
+            power_item = QTableWidgetItem(f"{dev.power_w:g}")
+            self.table.setItem(row, 2, power_item)
+
+            duration_item = QTableWidgetItem(format_duration_minutes(dev.default_duration_min))
+            self.table.setItem(row, 3, duration_item)
+
+            variable_item = QTableWidgetItem("")
+            variable_item.setFlags(variable_item.flags() | Qt.ItemIsUserCheckable)
+            variable_item.setFlags(variable_item.flags() & ~Qt.ItemIsEditable)
+            variable_item.setCheckState(Qt.Checked if dev.variable else Qt.Unchecked)
+            self.table.setItem(row, 4, variable_item)
+        self.table.blockSignals(False)
+
+    def _notify_parent(self):
+        parent = self.parent()
+        if parent and hasattr(parent, "refresh_tables"):
+            parent.refresh_tables()
+        if parent and hasattr(parent, "recompute"):
+            parent.recompute()
+
+    def _on_item_changed(self, item: QTableWidgetItem):
+        if not self.project:
+            return
+        row, col = item.row(), item.column()
+        if not (0 <= row < len(self.project.devices)):
+            return
+        dev = self.project.devices[row]
+        updated = False
+        if col == 0:
+            dev.enabled = (item.checkState() == Qt.Checked)
+            updated = True
+        elif col == 1:
+            dev.name = item.text().strip() or dev.name
+            updated = True
+        elif col == 2:
+            try:
+                dev.power_w = max(0.0, float(item.text()))
+                updated = True
+            except Exception:
+                self.table.blockSignals(True)
+                item.setText(f"{dev.power_w:g}")
+                self.table.blockSignals(False)
+        elif col == 3:
+            parsed = parse_duration_text(item.text())
+            if parsed is None:
+                self.table.blockSignals(True)
+                item.setText(format_duration_minutes(dev.default_duration_min))
+                self.table.blockSignals(False)
+            else:
+                dev.default_duration_min = parsed
+                updated = True
+        elif col == 4:
+            dev.variable = (item.checkState() == Qt.Checked)
+            updated = True
+
+        if updated:
+            dev.apply_usage_settings()
+            self.table.blockSignals(True)
+            self.table.item(row, 3).setText(format_duration_minutes(dev.default_duration_min))
+            self.table.blockSignals(False)
+            self._notify_parent()
+
+    def _add_device(self):
+        if not self.project:
+            return
+        dev = Device(
+            name="Device",
+            dtype=DeviceType.SCHEDULED,
+            power_w=20.0,
+            enabled=True,
+            default_duration_min=30,
+            variable=True,
+        )
+        dev.apply_usage_settings()
+        self.project.devices.append(dev)
+        self.refresh_table()
+        self.table.selectRow(len(self.project.devices) - 1)
+        self._notify_parent()
+
+    def _remove_selected(self):
+        if not self.project:
+            return
+        rows = sorted({item.row() for item in self.table.selectedItems()}, reverse=True)
+        if not rows:
+            return
+        for row in rows:
+            if 0 <= row < len(self.project.devices):
+                self.project.devices.pop(row)
+        self.refresh_table()
+        self._notify_parent()
+
+    def _duplicate_selected(self):
+        if not self.project:
+            return
+        rows = sorted({item.row() for item in self.table.selectedItems()})
+        if not rows:
+            return
+        insert_at = rows[-1] + 1
+        for row in rows:
+            if 0 <= row < len(self.project.devices):
+                clone = Device.from_dict(self.project.devices[row].to_dict())
+                clone.name = f"{clone.name} Copy"
+                self.project.devices.insert(insert_at, clone)
+                insert_at += 1
+        self.refresh_table()
+        self.table.selectRow(insert_at - 1)
+        self._notify_parent()
+
+# =========================
 # Scheduled block dialog
 # =========================
 
@@ -877,6 +1117,7 @@ class TimelineWidget(QWidget):
         self.project: Optional[Project] = None
         self.settings: Optional[SettingsModel] = None
         self.sim: Optional[SimResult] = None
+        self.visible_device_indices: List[int] = []
 
         # layout constants
         self.left_label_w = 220
@@ -905,9 +1146,18 @@ class TimelineWidget(QWidget):
         self.project = project
         self.settings = settings
         self.sim = sim
+        self._update_visible_devices()
         self._update_left_label_width()
         self.updateGeometry()
         self.update()
+
+    def _update_visible_devices(self):
+        if not self.project:
+            self.visible_device_indices = []
+            return
+        self.visible_device_indices = [
+            idx for idx, dev in enumerate(self.project.devices) if dev.enabled
+        ]
 
     def _update_left_label_width(self):
         if not self.project:
@@ -916,7 +1166,8 @@ class TimelineWidget(QWidget):
         name_metrics = QFontMetrics(self.name_font)
         power_metrics = QFontMetrics(self.power_font)
         widest = 0
-        for dev in self.project.devices:
+        for idx in self.visible_device_indices:
+            dev = self.project.devices[idx]
             widest = max(
                 widest,
                 name_metrics.horizontalAdvance(dev.name),
@@ -927,7 +1178,7 @@ class TimelineWidget(QWidget):
     def sizeHint(self):
         if not self.project:
             return QSize(900, 500)
-        h = self.top_tariff_h + self.axis_h + (len(self.project.devices) * (self.row_h + self.row_gap)) + 20
+        h = self.top_tariff_h + self.axis_h + (len(self.visible_device_indices) * (self.row_h + self.row_gap)) + 20
         return QSize(1100, max(500, h))
 
     def _timeline_rect(self) -> QRect:
@@ -980,8 +1231,9 @@ class TimelineWidget(QWidget):
         self._paint_axis(p)
 
         # Draw device rows
-        for i, dev in enumerate(self.project.devices):
-            self._paint_row(p, i, dev)
+        for row_index, dev_index in enumerate(self.visible_device_indices):
+            dev = self.project.devices[dev_index]
+            self._paint_row(p, row_index, dev_index, dev)
 
     def _paint_tariff(self, p: QPainter):
         tr = self._tariff_rect()
@@ -1049,16 +1301,16 @@ class TimelineWidget(QWidget):
         p.setPen(QColor(90, 90, 100))
         p.drawLine(tl.left(), axis_y + 20, tl.right(), axis_y + 20)
 
-    def _paint_row(self, p: QPainter, idx: int, dev: Device):
-        rr = self._row_rect(idx)
+    def _paint_row(self, p: QPainter, row_index: int, dev_index: int, dev: Device):
+        rr = self._row_rect(row_index)
         # row background
-        bg = QColor(34, 34, 38) if idx % 2 == 0 else QColor(30, 30, 34)
+        bg = QColor(34, 34, 38) if row_index % 2 == 0 else QColor(30, 30, 34)
         p.setPen(Qt.NoPen)
         p.setBrush(bg)
         p.drawRect(rr)
 
         # label left
-        lr = self._device_label_rect(idx)
+        lr = self._device_label_rect(row_index)
         name_metrics = QFontMetrics(self.name_font)
         power_metrics = QFontMetrics(self.power_font)
         name_h = name_metrics.height()
@@ -1083,13 +1335,21 @@ class TimelineWidget(QWidget):
         elif dev.dtype == DeviceType.SCHEDULED:
             for j, iv in enumerate(dev.intervals):
                 ivn = iv.normalized()
-                hover = (self.hover_hit.kind.startswith("interval") and self.hover_hit.device_index == idx and self.hover_hit.item_index == j)
+                hover = (
+                    self.hover_hit.kind.startswith("interval")
+                    and self.hover_hit.device_index == dev_index
+                    and self.hover_hit.item_index == j
+                )
                 self._draw_block(p, rr, ivn.start_min, ivn.end_min, QColor(100, 170, 240, 190), hover=hover)
 
         elif dev.dtype == DeviceType.EVENTS:
             for j, ev in enumerate(dev.events):
                 evn = ev.normalized()
-                hover = (self.hover_hit.kind == HitKind.EVENT_BODY and self.hover_hit.device_index == idx and self.hover_hit.item_index == j)
+                hover = (
+                    self.hover_hit.kind == HitKind.EVENT_BODY
+                    and self.hover_hit.device_index == dev_index
+                    and self.hover_hit.item_index == j
+                )
                 self._draw_event(p, rr, evn.start_min, evn.duration_min, QColor(240, 170, 90, 200), hover=hover)
 
         # row border
@@ -1098,10 +1358,10 @@ class TimelineWidget(QWidget):
         p.drawRect(rr)
 
         # right info
-        info = self._device_info_rect(idx)
-        on_min = self.sim.per_device_on_minutes[idx] if self.sim else 0
-        kwh = self.sim.per_device_kwh_day[idx] if self.sim else 0.0
-        cost = self.sim.per_device_cost_day[idx] if self.sim else 0.0
+        info = self._device_info_rect(row_index)
+        on_min = self.sim.per_device_on_minutes[dev_index] if self.sim else 0
+        kwh = self.sim.per_device_kwh_day[dev_index] if self.sim else 0.0
+        cost = self.sim.per_device_cost_day[dev_index] if self.sim else 0.0
         p.setPen(QColor(220, 220, 230))
         p.drawText(
             info, Qt.AlignVCenter | Qt.AlignLeft,
@@ -1184,18 +1444,18 @@ class TimelineWidget(QWidget):
         # click empty space on a row to add:
         if hit.kind == HitKind.NONE:
             # identify row if clicked in a row
-            di = self._device_index_from_pos(pos)
-            if di != -1:
-                dev = self.project.devices[di]
+            _row_index, dev_index = self._device_index_from_pos(pos)
+            if dev_index != -1:
+                dev = self.project.devices[dev_index]
                 m = self._x_to_minute(pos.x())
                 if dev.dtype == DeviceType.SCHEDULED:
-                    # add a 30 min block by default
-                    dev.intervals.append(Interval(m, min(MINUTES_PER_DAY, m + 30)).normalized())
+                    duration = max(1, dev.default_duration_min)
+                    dev.intervals.append(Interval(m, min(MINUTES_PER_DAY, m + duration)).normalized())
                     self._trigger_recompute()
                     return
                 elif dev.dtype == DeviceType.EVENTS:
-                    # add event with default duration 3 minutes, no fixed energy by default
-                    dev.events.append(Event(m, 3, None).normalized())
+                    duration = max(1, dev.default_duration_min)
+                    dev.events.append(Event(m, duration, None).normalized())
                     self._trigger_recompute()
                     return
                 # always-on: do nothing
@@ -1214,10 +1474,10 @@ class TimelineWidget(QWidget):
         if not (self.project and self.settings and self.sim):
             return
         pos = e.position().toPoint()
-        di = self._device_index_from_pos(pos)
-        if di == -1:
+        _row_index, dev_index = self._device_index_from_pos(pos)
+        if dev_index == -1:
             return
-        dev = self.project.devices[di]
+        dev = self.project.devices[dev_index]
         if dev.dtype == DeviceType.SCHEDULED:
             hit = self._hit_test(pos)
             if not hit.kind.startswith("interval"):
@@ -1229,9 +1489,13 @@ class TimelineWidget(QWidget):
                 if always_on:
                     dev.dtype = DeviceType.ALWAYS
                     dev.intervals = []
+                    dev.default_duration_min = MINUTES_PER_DAY
+                    dev.variable = False
                 else:
                     dev.dtype = DeviceType.SCHEDULED
                     dev.intervals[hit.item_index] = Interval(start_min, end_min).normalized()
+                    dev.default_duration_min = max(1, end_min - start_min)
+                    dev.variable = True
                 self._trigger_refresh()
         elif dev.dtype == DeviceType.ALWAYS:
             dlg = IntervalDialog(self, 0, MINUTES_PER_DAY, always_on=True)
@@ -1240,9 +1504,13 @@ class TimelineWidget(QWidget):
                 if always_on:
                     dev.dtype = DeviceType.ALWAYS
                     dev.intervals = []
+                    dev.default_duration_min = MINUTES_PER_DAY
+                    dev.variable = False
                 else:
                     dev.dtype = DeviceType.SCHEDULED
                     dev.intervals = [Interval(start_min, end_min).normalized()]
+                    dev.default_duration_min = max(1, end_min - start_min)
+                    dev.variable = True
                 self._trigger_refresh()
 
     def mouseReleaseEvent(self, e):
@@ -1268,24 +1536,24 @@ class TimelineWidget(QWidget):
             win.refresh_tables()
         self._trigger_recompute()
 
-    def _device_index_from_pos(self, pos: QPoint) -> int:
+    def _device_index_from_pos(self, pos: QPoint) -> Tuple[int, int]:
         tl = self._timeline_rect()
         if pos.y() < tl.top() or pos.y() > tl.bottom():
-            return -1
-        # check each row rect
-        for i in range(len(self.project.devices)):
-            rr = self._row_rect(i)
+            return -1, -1
+        # check each visible row rect
+        for row_index, dev_index in enumerate(self.visible_device_indices):
+            rr = self._row_rect(row_index)
             if rr.contains(pos):
-                return i
-        return -1
+                return row_index, dev_index
+        return -1, -1
 
     def _hit_test(self, pos: QPoint) -> HitTest:
-        di = self._device_index_from_pos(pos)
-        if di == -1:
+        row_index, dev_index = self._device_index_from_pos(pos)
+        if dev_index == -1:
             return HitTest()
 
-        dev = self.project.devices[di]
-        rr = self._row_rect(di)
+        dev = self.project.devices[dev_index]
+        rr = self._row_rect(row_index)
 
         def near(x, target, px=5):
             return abs(x - target) <= px
@@ -1299,10 +1567,10 @@ class TimelineWidget(QWidget):
                 if rect.contains(pos):
                     # edges?
                     if near(pos.x(), rect.left()):
-                        return HitTest(HitKind.INTERVAL_LEFT, di, j, self._x_to_minute(pos.x()))
+                        return HitTest(HitKind.INTERVAL_LEFT, dev_index, j, self._x_to_minute(pos.x()))
                     if near(pos.x(), rect.right()):
-                        return HitTest(HitKind.INTERVAL_RIGHT, di, j, self._x_to_minute(pos.x()))
-                    return HitTest(HitKind.INTERVAL_BODY, di, j, self._x_to_minute(pos.x()))
+                        return HitTest(HitKind.INTERVAL_RIGHT, dev_index, j, self._x_to_minute(pos.x()))
+                    return HitTest(HitKind.INTERVAL_BODY, dev_index, j, self._x_to_minute(pos.x()))
 
         if dev.dtype == DeviceType.EVENTS:
             for j, ev in enumerate(dev.events):
@@ -1311,7 +1579,7 @@ class TimelineWidget(QWidget):
                 x1 = self._minute_to_x(evn.start_min + evn.duration_min)
                 rect = QRect(x0, rr.top() + 10, max(3, x1 - x0), rr.height() - 20)
                 if rect.contains(pos):
-                    return HitTest(HitKind.EVENT_BODY, di, j, self._x_to_minute(pos.x()))
+                    return HitTest(HitKind.EVENT_BODY, dev_index, j, self._x_to_minute(pos.x()))
 
         if dev.dtype == DeviceType.ALWAYS:
             # optionally allow click to do nothing
@@ -1383,70 +1651,51 @@ class MainWindow(QMainWindow):
 
         # project state
         self.project = Project(devices=[
-            Device(name="Router", dtype=DeviceType.ALWAYS, power_w=10.0),
-            Device(name="Grow light", dtype=DeviceType.SCHEDULED, power_w=120.0,
-                   intervals=[Interval(8*60, 18*60)]),
-            Device(name="Kettle", dtype=DeviceType.EVENTS, power_w=2400.0,
-                   events=[Event(7*60+15, 3, None), Event(18*60+40, 3, None)]),
+            Device(
+                name="Router",
+                dtype=DeviceType.ALWAYS,
+                power_w=10.0,
+                enabled=True,
+                default_duration_min=MINUTES_PER_DAY,
+                variable=False,
+            ),
+            Device(
+                name="Grow light",
+                dtype=DeviceType.SCHEDULED,
+                power_w=120.0,
+                enabled=True,
+                default_duration_min=10 * 60,
+                variable=True,
+                intervals=[Interval(8*60, 18*60)],
+            ),
+            Device(
+                name="Kettle",
+                dtype=DeviceType.EVENTS,
+                power_w=2400.0,
+                enabled=True,
+                default_duration_min=3,
+                variable=False,
+                events=[Event(7*60+15, 3, None), Event(18*60+40, 3, None)],
+            ),
         ])
         self.current_file: Optional[str] = None
+        self.device_dialog: Optional["DeviceListDialog"] = None
 
         # central layout
         root = QWidget()
         self.setCentralWidget(root)
         root_layout = QVBoxLayout(root)
 
-        splitter = QSplitter(Qt.Horizontal)
-        root_layout.addWidget(splitter)
-
-        # left panel: device table + controls
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-
-        self.device_table = QTableWidget(0, 3)
-        self.device_table.setHorizontalHeaderLabels(["Name", "Type", "Power (W)"])
-        self.device_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.device_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.device_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.device_table.verticalHeader().setVisible(False)
-        self.device_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.device_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed | QTableWidget.SelectedClicked)
-        left_layout.addWidget(QLabel("Devices"))
-        left_layout.addWidget(self.device_table)
-
-        btn_row = QHBoxLayout()
-        self.btn_add = QPushButton("Add device")
-        self.btn_del = QPushButton("Remove device")
-        btn_row.addWidget(self.btn_add)
-        btn_row.addWidget(self.btn_del)
-        left_layout.addLayout(btn_row)
-
-        splitter.addWidget(left)
-
-        # right panel: timeline + summary
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-
         self.timeline = TimelineWidget(parent=self)
-        right_layout.addWidget(self.timeline, stretch=1)
+        root_layout.addWidget(self.timeline, stretch=1)
 
         self.summary = QLabel("")
         self.summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.summary.setStyleSheet("QLabel { padding: 8px; background: #1e1e22; color: #e8e8ee; }")
-        right_layout.addWidget(self.summary, stretch=0)
-
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([420, 900])
+        root_layout.addWidget(self.summary, stretch=0)
 
         # menu
         self._build_menu()
-
-        # wire signals
-        self.btn_add.clicked.connect(self.add_device)
-        self.btn_del.clicked.connect(self.remove_device)
-        self.device_table.itemChanged.connect(self.on_device_table_changed)
 
         # first run -> show settings
         if not SettingsModel.has_run_before(self.qs):
@@ -1478,6 +1727,11 @@ class MainWindow(QMainWindow):
         act_settings = QAction("Settings…", self)
         editm.addAction(act_settings)
         act_settings.triggered.connect(self.open_settings)
+
+        devm = mb.addMenu("&Devices")
+        act_device_list = QAction("Device List…", self)
+        devm.addAction(act_device_list)
+        act_device_list.triggered.connect(self.open_device_list)
 
         timingm = mb.addMenu("&Timing")
         act_custom_periods = QAction("Custom Periods…", self)
@@ -1564,69 +1818,23 @@ class MainWindow(QMainWindow):
             self.project.custom_periods = dlg.get_periods()
             self.recompute()
 
+    def open_device_list(self):
+        dlg = DeviceListDialog(self, self.project)
+        self.device_dialog = dlg
+        try:
+            dlg.exec()
+        finally:
+            self.device_dialog = None
+            self.refresh_tables()
+            self.recompute()
+
     # ---------------------
     # Tables <-> model sync
     # ---------------------
 
     def refresh_tables(self):
-        # devices
-        self.device_table.blockSignals(True)
-        self.device_table.setRowCount(len(self.project.devices))
-        for r, dev in enumerate(self.project.devices):
-            it_name = QTableWidgetItem(dev.name)
-            self.device_table.setItem(r, 0, it_name)
-
-            cb = QComboBox()
-            cb.addItems([DeviceType.ALWAYS, DeviceType.SCHEDULED, DeviceType.EVENTS])
-            cb.setCurrentText(dev.dtype)
-            cb.currentTextChanged.connect(lambda _txt, row=r: self._on_device_type_changed(row))
-            self.device_table.setCellWidget(r, 1, cb)
-
-            it_p = QTableWidgetItem(f"{dev.power_w:g}")
-            self.device_table.setItem(r, 2, it_p)
-
-        self.device_table.blockSignals(False)
-
-    def _on_device_type_changed(self, row: int):
-        if not (0 <= row < len(self.project.devices)):
-            return
-        cb: QComboBox = self.device_table.cellWidget(row, 1)
-        dtype = cb.currentText()
-        self.project.devices[row].dtype = dtype
-        self.recompute()
-
-    def on_device_table_changed(self, item: QTableWidgetItem):
-        r, c = item.row(), item.column()
-        if not (0 <= r < len(self.project.devices)):
-            return
-        dev = self.project.devices[r]
-        try:
-            if c == 0:
-                dev.name = item.text().strip() or dev.name
-            elif c == 2:
-                dev.power_w = max(0.0, float(item.text()))
-        except Exception:
-            pass
-        self.recompute()
-
-    # ---------------------
-    # Buttons
-    # ---------------------
-
-    def add_device(self):
-        self.project.devices.append(Device(name="Device", dtype=DeviceType.SCHEDULED, power_w=20.0))
-        self.refresh_tables()
-        self.recompute()
-
-    def remove_device(self):
-        rows = sorted({i.row() for i in self.device_table.selectedItems()}, reverse=True)
-        if not rows:
-            return
-        for r in rows:
-            if 0 <= r < len(self.project.devices):
-                self.project.devices.pop(r)
-        self.refresh_tables()
-        self.recompute()
+        if self.device_dialog and self.device_dialog.isVisible():
+            self.device_dialog.refresh_table()
 
     # ---------------------
     # Recompute & summary
