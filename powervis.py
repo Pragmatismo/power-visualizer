@@ -1877,6 +1877,10 @@ class TimelineWidget(QWidget):
         self.font = QFont("Sans", 9)
         self.tariff_font = QFont("Sans", 15)
         self.name_font = QFont("Sans", 10, QFont.DemiBold)
+        self.tariff_company_font = QFont(self.name_font)
+        self.tariff_company_font.setWeight(QFont.Bold)
+        self.tariff_label_font = QFont(self.name_font)
+        self.tariff_label_font.setWeight(QFont.Normal)
         self.power_font = QFont("Sans", 9)
         self.info_font = QFont("Sans", 11)
         self.setMinimumHeight(400)
@@ -2073,13 +2077,36 @@ class TimelineWidget(QWidget):
         p.setPen(QPen(QColor(120, 120, 130), 1))
         p.setBrush(Qt.NoBrush)
         p.drawRect(tr)
-        p.setFont(self.tariff_font)
         p.setPen(QColor(230, 235, 245))
         label_width = self.left_label_w - self.label_pad * 2
         label_right = tr.left() - 4
         label_rect = QRect(label_right - label_width, tr.top(), label_width, tr.height())
         label = self.settings.tariff_label or "Tariff"
-        p.drawText(label_rect, Qt.AlignVCenter | Qt.AlignRight, label)
+        if " — " in label:
+            company_name, tariff_name = label.split(" — ", 1)
+        elif " - " in label:
+            company_name, tariff_name = label.split(" - ", 1)
+        else:
+            company_name, tariff_name = label, ""
+        company_metrics = QFontMetrics(self.tariff_company_font)
+        label_metrics = QFontMetrics(self.tariff_label_font)
+        line_gap = 2
+        total_h = company_metrics.height() + (label_metrics.height() if tariff_name else 0)
+        if tariff_name:
+            total_h += line_gap
+        start_y = label_rect.top() + (label_rect.height() - total_h) // 2
+        company_rect = QRect(label_rect.left(), start_y, label_rect.width(), company_metrics.height())
+        p.setFont(self.tariff_company_font)
+        p.drawText(company_rect, Qt.AlignRight | Qt.AlignVCenter, company_name)
+        if tariff_name:
+            tariff_rect = QRect(
+                label_rect.left(),
+                company_rect.bottom() + 1 + line_gap,
+                label_rect.width(),
+                label_metrics.height(),
+            )
+            p.setFont(self.tariff_label_font)
+            p.drawText(tariff_rect, Qt.AlignRight | Qt.AlignVCenter, tariff_name)
 
     def _paint_axis(self, p: QPainter):
         tl = self._timeline_rect()
