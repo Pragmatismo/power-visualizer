@@ -532,20 +532,47 @@ def build_tariff_minute_rates(tariff: dict) -> List[float]:
     return minute_rates
 
 
-def tariff_headline(tariff: dict, currency_symbol: str) -> str:
+def format_tariff_rate(rate: float, currency_symbol: str) -> str:
+    return f"{currency_symbol}{rate:.4f}/kWh"
+
+
+def has_timed_offpeak_rate(rates: List[dict], offpeak_rate: float) -> bool:
+    for rate in rates:
+        rate_value = rate.get("rate_gbp_per_kwh")
+        if rate_value is None or float(rate_value) != offpeak_rate:
+            continue
+        schedule = rate.get("schedule") or {}
+        day_sets = schedule.get("day_sets", [])
+        if not is_all_days(day_sets):
+            continue
+        time_ranges = schedule.get("time_ranges") or []
+        if len(time_ranges) != 1:
+            continue
+        time_range = time_ranges[0]
+        start = parse_hhmm(time_range.get("start", ""))
+        end = parse_hhmm(time_range.get("end", ""))
+        if start is None or end is None or start == end:
+            continue
+        if start == 0 and end == MINUTES_PER_DAY:
+            continue
+        return True
+    return False
+
+
+def tariff_price_summary(tariff: dict, currency_symbol: str) -> Tuple[str, str, str]:
     rates = tariff.get("rates") or []
-    if tariff.get("complicated") or not rates:
-        return "Complicated"
-    if all(rate.get("rate_gbp_per_kwh") is None for rate in rates):
-        return "Complicated"
-    if tariff.get("pricing_model") == "flat_or_tou":
-        for rate in rates:
-            if rate.get("rate_gbp_per_kwh") is None:
-                continue
-            if is_all_day_rate(rate):
-                return f"{currency_symbol}{float(rate['rate_gbp_per_kwh']):.4f}/kWh"
-        return "TOU"
-    return "Complicated"
+    rate_values = [float(rate["rate_gbp_per_kwh"]) for rate in rates if rate.get("rate_gbp_per_kwh") is not None]
+    if tariff.get("complicated") or not rate_values:
+        return "Complicated", "", "False"
+    main_rate = max(rate_values)
+    main_display = format_tariff_rate(main_rate, currency_symbol)
+    unique_rates = sorted(set(rate_values))
+    if len(unique_rates) == 1:
+        return main_display, "", "False"
+    offpeak_rate = unique_rates[0]
+    offpeak_display = format_tariff_rate(offpeak_rate, currency_symbol)
+    peak_times = has_timed_offpeak_rate(rates, offpeak_rate)
+    return main_display, offpeak_display, "True" if peak_times else "False"
 
 
 def load_tariff_document(path: str) -> TariffDocument:
@@ -1285,12 +1312,14 @@ class TariffSelectionDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Select", "Supplier", "Tariff", "Headline price"])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["Select", "Supplier", "Tariff", "Price", "Off peak", "Peak times"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.table)
@@ -1315,19 +1344,19 @@ class TariffSelectionDialog(QDialog):
     def _refresh_table(self):
         self.table.blockSignals(True)
         self._entries = []
-        rows: List[Tuple[str, str, str]] = []
-        rows.append(("Custom", "", "Use Settings"))
+        rows: List[Tuple[str, str, str, str, str]] = []
+        rows.append(("Custom", "", "Use Settings", "", ""))
         self._entries.append(None)
 
         for doc in self._documents:
             for supplier_index, supplier in enumerate(doc.data.get("suppliers", [])):
                 for tariff_index, tariff in enumerate(supplier.get("tariffs", [])):
-                    headline = tariff_headline(tariff, self._currency_symbol)
-                    rows.append((supplier.get("supplier_name", ""), tariff.get("tariff_name", ""), headline))
+                    price, offpeak, peak_times = tariff_price_summary(tariff, self._currency_symbol)
+                    rows.append((supplier.get("supplier_name", ""), tariff.get("tariff_name", ""), price, offpeak, peak_times))
                     self._entries.append(TariffEntry(doc, supplier_index, tariff_index))
 
         self.table.setRowCount(len(rows))
-        for row_index, (supplier_name, tariff_name, headline) in enumerate(rows):
+        for row_index, (supplier_name, tariff_name, price, offpeak, peak_times) in enumerate(rows):
             check_item = QTableWidgetItem("")
             check_item.setFlags(check_item.flags() | Qt.ItemIsUserCheckable)
             check_item.setFlags(check_item.flags() & ~Qt.ItemIsEditable)
@@ -1344,7 +1373,9 @@ class TariffSelectionDialog(QDialog):
             self.table.setItem(row_index, 0, check_item)
             self.table.setItem(row_index, 1, QTableWidgetItem(supplier_name))
             self.table.setItem(row_index, 2, QTableWidgetItem(tariff_name))
-            self.table.setItem(row_index, 3, QTableWidgetItem(headline))
+            self.table.setItem(row_index, 3, QTableWidgetItem(price))
+            self.table.setItem(row_index, 4, QTableWidgetItem(offpeak))
+            self.table.setItem(row_index, 5, QTableWidgetItem(peak_times))
 
         self.table.blockSignals(False)
 
