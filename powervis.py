@@ -517,18 +517,27 @@ def build_tariff_minute_rates(tariff: dict) -> List[float]:
         priority = int(rate.get("priority", 0))
         schedule = rate.get("schedule") or {}
         time_ranges = schedule.get("time_ranges") or []
+        apply_all_day = False
         if not time_ranges:
-            continue
+            apply_all_day = True
         for time_range in time_ranges:
             start = parse_hhmm(time_range.get("start", ""))
             end = parse_hhmm(time_range.get("end", ""))
-            if start is None or end is None or start == end:
+            if start is None or end is None:
+                continue
+            if start == end:
+                apply_all_day = True
                 continue
             for minute in range(MINUTES_PER_DAY):
                 if is_minute_in_window(minute, start, end):
                     if priority >= minute_priority[minute]:
                         minute_priority[minute] = priority
                         minute_rates[minute] = float(rate_value)
+        if apply_all_day:
+            for minute in range(MINUTES_PER_DAY):
+                if priority >= minute_priority[minute]:
+                    minute_priority[minute] = priority
+                    minute_rates[minute] = float(rate_value)
     return minute_rates
 
 
