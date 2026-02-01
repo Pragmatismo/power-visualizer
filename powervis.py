@@ -507,6 +507,164 @@ class SettingsDialog(QDialog):
 
 
 # =========================
+# Scheduled block dialog
+# =========================
+
+class IntervalDialog(QDialog):
+    def __init__(self, parent=None, start_min: int = 0, end_min: int = MINUTES_PER_DAY, always_on: bool = False):
+        super().__init__(parent)
+        self.setWindowTitle("Schedule block")
+        self._updating = False
+
+        layout = QVBoxLayout(self)
+
+        self.always_on = QCheckBox("Always On")
+        self.always_on.setChecked(always_on)
+        layout.addWidget(self.always_on)
+
+        form = QFormLayout()
+
+        self.start_hour = QSpinBox()
+        self.start_hour.setRange(0, 23)
+        self.start_minute = QSpinBox()
+        self.start_minute.setRange(0, 59)
+        start_row = QHBoxLayout()
+        start_row.addWidget(QLabel("Hour"))
+        start_row.addWidget(self.start_hour)
+        start_row.addWidget(QLabel("Min"))
+        start_row.addWidget(self.start_minute)
+        form.addRow("Start time", start_row)
+
+        self.end_hour = QSpinBox()
+        self.end_hour.setRange(0, 24)
+        self.end_minute = QSpinBox()
+        self.end_minute.setRange(0, 59)
+        end_row = QHBoxLayout()
+        end_row.addWidget(QLabel("Hour"))
+        end_row.addWidget(self.end_hour)
+        end_row.addWidget(QLabel("Min"))
+        end_row.addWidget(self.end_minute)
+        form.addRow("End time", end_row)
+
+        self.duration_hour = QSpinBox()
+        self.duration_hour.setRange(0, 24)
+        self.duration_minute = QSpinBox()
+        self.duration_minute.setRange(0, 59)
+        dur_row = QHBoxLayout()
+        dur_row.addWidget(QLabel("Hour"))
+        dur_row.addWidget(self.duration_hour)
+        dur_row.addWidget(QLabel("Min"))
+        dur_row.addWidget(self.duration_minute)
+        form.addRow("Duration", dur_row)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._set_start_end(start_min, end_min)
+        self._set_duration_from_times()
+
+        self.always_on.stateChanged.connect(self._toggle_always_on)
+        self.start_hour.valueChanged.connect(self._time_changed)
+        self.start_minute.valueChanged.connect(self._time_changed)
+        self.end_hour.valueChanged.connect(self._time_changed)
+        self.end_minute.valueChanged.connect(self._time_changed)
+        self.duration_hour.valueChanged.connect(self._duration_changed)
+        self.duration_minute.valueChanged.connect(self._duration_changed)
+
+        self._toggle_always_on()
+
+    def _toggle_always_on(self):
+        is_always = self.always_on.isChecked()
+        for widget in (
+            self.start_hour, self.start_minute,
+            self.end_hour, self.end_minute,
+            self.duration_hour, self.duration_minute,
+        ):
+            widget.setEnabled(not is_always)
+        if is_always:
+            self._set_start_end(0, MINUTES_PER_DAY)
+            self._set_duration_from_times()
+
+    def _set_start_end(self, start_min: int, end_min: int):
+        self._updating = True
+        start_min = clamp(int(start_min), 0, MINUTES_PER_DAY - 1)
+        end_min = clamp(int(end_min), 1, MINUTES_PER_DAY)
+        if end_min <= start_min:
+            end_min = min(MINUTES_PER_DAY, start_min + 1)
+        self.start_hour.setValue(start_min // 60)
+        self.start_minute.setValue(start_min % 60)
+        self.end_hour.setValue(end_min // 60)
+        self.end_minute.setValue(end_min % 60 if end_min < MINUTES_PER_DAY else 0)
+        self._sync_end_minute_state()
+        self._updating = False
+
+    def _sync_end_minute_state(self):
+        if self.end_hour.value() == 24:
+            self.end_minute.setValue(0)
+            self.end_minute.setEnabled(False)
+        else:
+            self.end_minute.setEnabled(True)
+
+    def _start_minutes(self) -> int:
+        return self.start_hour.value() * 60 + self.start_minute.value()
+
+    def _end_minutes(self) -> int:
+        end_hour = self.end_hour.value()
+        if end_hour == 24:
+            return MINUTES_PER_DAY
+        return end_hour * 60 + self.end_minute.value()
+
+    def _duration_minutes(self) -> int:
+        return self.duration_hour.value() * 60 + self.duration_minute.value()
+
+    def _set_duration_from_times(self):
+        self._updating = True
+        duration = max(1, self._end_minutes() - self._start_minutes())
+        self.duration_hour.setValue(duration // 60)
+        self.duration_minute.setValue(duration % 60)
+        self._updating = False
+
+    def _time_changed(self):
+        if self._updating or self.always_on.isChecked():
+            return
+        self._sync_end_minute_state()
+        start_min = self._start_minutes()
+        end_min = self._end_minutes()
+        if end_min <= start_min:
+            end_min = min(MINUTES_PER_DAY, start_min + 1)
+            self._set_start_end(start_min, end_min)
+        self._set_duration_from_times()
+
+    def _duration_changed(self):
+        if self._updating or self.always_on.isChecked():
+            return
+        duration = max(1, self._duration_minutes())
+        start_min = self._start_minutes()
+        max_duration = max(1, MINUTES_PER_DAY - start_min)
+        if duration > max_duration:
+            duration = max_duration
+            self._updating = True
+            self.duration_hour.setValue(duration // 60)
+            self.duration_minute.setValue(duration % 60)
+            self._updating = False
+        end_min = start_min + duration
+        self._set_start_end(start_min, end_min)
+
+    def get_result(self) -> Tuple[bool, int, int]:
+        if self.always_on.isChecked():
+            return True, 0, MINUTES_PER_DAY
+        start_min = self._start_minutes()
+        end_min = self._end_minutes()
+        if end_min <= start_min:
+            end_min = min(MINUTES_PER_DAY, start_min + 1)
+        return False, start_min, end_min
+
+
+# =========================
 # Timeline widget
 # =========================
 
@@ -838,6 +996,41 @@ class TimelineWidget(QWidget):
         if hit.kind in (HitKind.INTERVAL_BODY, HitKind.EVENT_BODY):
             self.setCursor(Qt.ClosedHandCursor)
 
+    def mouseDoubleClickEvent(self, e):
+        if not (self.project and self.settings and self.sim):
+            return
+        pos = e.position().toPoint()
+        di = self._device_index_from_pos(pos)
+        if di == -1:
+            return
+        dev = self.project.devices[di]
+        if dev.dtype == DeviceType.SCHEDULED:
+            hit = self._hit_test(pos)
+            if not hit.kind.startswith("interval"):
+                return
+            interval = dev.intervals[hit.item_index].normalized()
+            dlg = IntervalDialog(self, interval.start_min, interval.end_min, always_on=False)
+            if dlg.exec() == QDialog.Accepted:
+                always_on, start_min, end_min = dlg.get_result()
+                if always_on:
+                    dev.dtype = DeviceType.ALWAYS
+                    dev.intervals = []
+                else:
+                    dev.dtype = DeviceType.SCHEDULED
+                    dev.intervals[hit.item_index] = Interval(start_min, end_min).normalized()
+                self._trigger_refresh()
+        elif dev.dtype == DeviceType.ALWAYS:
+            dlg = IntervalDialog(self, 0, MINUTES_PER_DAY, always_on=True)
+            if dlg.exec() == QDialog.Accepted:
+                always_on, start_min, end_min = dlg.get_result()
+                if always_on:
+                    dev.dtype = DeviceType.ALWAYS
+                    dev.intervals = []
+                else:
+                    dev.dtype = DeviceType.SCHEDULED
+                    dev.intervals = [Interval(start_min, end_min).normalized()]
+                self._trigger_refresh()
+
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self.dragging:
             self.dragging = False
@@ -854,6 +1047,12 @@ class TimelineWidget(QWidget):
         parent = self.parent()
         if parent and hasattr(parent, "recompute"):
             parent.recompute()
+
+    def _trigger_refresh(self):
+        win = self.window()
+        if hasattr(win, "refresh_tables"):
+            win.refresh_tables()
+        self._trigger_recompute()
 
     def _device_index_from_pos(self, pos: QPoint) -> int:
         tl = self._timeline_rect()
