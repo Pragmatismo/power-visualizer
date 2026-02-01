@@ -9,7 +9,7 @@ from PySide6.QtCore import (
     Qt, QRect, QRectF, QPoint, QPointF, QSize, QSettings, QTimer
 )
 from PySide6.QtGui import (
-    QAction, QBrush, QColor, QFont, QPainter, QPen, QCursor
+    QAction, QBrush, QColor, QFont, QPainter, QPen, QCursor, QFontMetrics
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -93,7 +93,6 @@ class Device:
     name: str = "New device"
     dtype: str = DeviceType.SCHEDULED
     power_w: float = 20.0
-    quantity: int = 1
 
     intervals: List[Interval] = field(default_factory=list)  # for scheduled
     events: List[Event] = field(default_factory=list)        # for per-use
@@ -103,7 +102,6 @@ class Device:
             "name": self.name,
             "dtype": self.dtype,
             "power_w": self.power_w,
-            "quantity": self.quantity,
             "intervals": [asdict(i) for i in self.intervals],
             "events": [asdict(e) for e in self.events],
         }
@@ -114,7 +112,6 @@ class Device:
             name=d.get("name", "Device"),
             dtype=d.get("dtype", DeviceType.SCHEDULED),
             power_w=float(d.get("power_w", 20.0)),
-            quantity=int(d.get("quantity", 1)),
         )
         dev.intervals = [Interval(**i).normalized() for i in d.get("intervals", [])]
         dev.events = [Event(**e).normalized() for e in d.get("events", [])]
@@ -308,8 +305,7 @@ def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
 
     # Build per-device minute power
     for i, dev in enumerate(project.devices):
-        qty = max(1, int(dev.quantity))
-        base_power_w = max(0.0, float(dev.power_w)) * qty
+        base_power_w = max(0.0, float(dev.power_w))
 
         if dev.dtype == DeviceType.ALWAYS:
             for m in range(MINUTES_PER_DAY):
@@ -334,7 +330,7 @@ def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
                     if hours <= 0:
                         continue
                     pw = (float(evn.energy_wh) / hours)  # W (since Wh / h = W)
-                    pw = max(0.0, pw) * qty
+                    pw = max(0.0, pw)
                     for m in range(evn.start_min, evn.start_min + evn.duration_min):
                         dev_w[i][m] += pw
 
@@ -701,6 +697,7 @@ class TimelineWidget(QWidget):
         self.row_h = 44
         self.row_gap = 6
         self.axis_h = 22
+        self.label_pad = 12
 
         # interaction state
         self.hit = HitTest()
@@ -712,14 +709,32 @@ class TimelineWidget(QWidget):
 
         # appearance
         self.font = QFont("Sans", 9)
+        self.name_font = QFont("Sans", 10, QFont.DemiBold)
+        self.power_font = QFont("Sans", 9)
         self.setMinimumHeight(400)
 
     def set_data(self, project: Project, settings: SettingsModel, sim: SimResult):
         self.project = project
         self.settings = settings
         self.sim = sim
+        self._update_left_label_width()
         self.updateGeometry()
         self.update()
+
+    def _update_left_label_width(self):
+        if not self.project:
+            self.left_label_w = 220
+            return
+        name_metrics = QFontMetrics(self.name_font)
+        power_metrics = QFontMetrics(self.power_font)
+        widest = 0
+        for dev in self.project.devices:
+            widest = max(
+                widest,
+                name_metrics.horizontalAdvance(dev.name),
+                power_metrics.horizontalAdvance(f"{dev.power_w:g} W"),
+            )
+        self.left_label_w = max(160, widest + self.label_pad * 2)
 
     def sizeHint(self):
         if not self.project:
@@ -749,7 +764,7 @@ class TimelineWidget(QWidget):
 
     def _device_label_rect(self, idx: int) -> QRect:
         rr = self._row_rect(idx)
-        return QRect(6, rr.top(), self.left_label_w - 12, rr.height())
+        return QRect(self.label_pad, rr.top(), self.left_label_w - self.label_pad * 2, rr.height())
 
     def _device_info_rect(self, idx: int) -> QRect:
         rr = self._row_rect(idx)
@@ -856,9 +871,20 @@ class TimelineWidget(QWidget):
 
         # label left
         lr = self._device_label_rect(idx)
+        name_metrics = QFontMetrics(self.name_font)
+        power_metrics = QFontMetrics(self.power_font)
+        name_h = name_metrics.height()
+        power_h = power_metrics.height()
+        total_h = name_h + power_h
+        start_y = lr.top() + (lr.height() - total_h) // 2
+        name_rect = QRect(lr.left(), start_y, lr.width(), name_h)
+        power_rect = QRect(lr.left(), start_y + name_h, lr.width(), power_h)
+
         p.setPen(QColor(220, 220, 230))
-        p.drawText(lr, Qt.AlignVCenter | Qt.AlignLeft,
-                   f"{dev.name}\n{dev.dtype} | {dev.power_w:g} W × {dev.quantity}")
+        p.setFont(self.name_font)
+        p.drawText(name_rect, Qt.AlignCenter, dev.name)
+        p.setFont(self.power_font)
+        p.drawText(power_rect, Qt.AlignCenter, f"{dev.power_w:g} W")
 
         # draw items on timeline
         p.setPen(Qt.NoPen)
@@ -1169,10 +1195,10 @@ class MainWindow(QMainWindow):
 
         # project state
         self.project = Project(devices=[
-            Device(name="Router", dtype=DeviceType.ALWAYS, power_w=10.0, quantity=1),
-            Device(name="Grow light", dtype=DeviceType.SCHEDULED, power_w=120.0, quantity=1,
+            Device(name="Router", dtype=DeviceType.ALWAYS, power_w=10.0),
+            Device(name="Grow light", dtype=DeviceType.SCHEDULED, power_w=120.0,
                    intervals=[Interval(8*60, 18*60)]),
-            Device(name="Kettle", dtype=DeviceType.EVENTS, power_w=2400.0, quantity=1,
+            Device(name="Kettle", dtype=DeviceType.EVENTS, power_w=2400.0,
                    events=[Event(7*60+15, 3, None), Event(18*60+40, 3, None)]),
         ])
         self.current_file: Optional[str] = None
@@ -1189,12 +1215,11 @@ class MainWindow(QMainWindow):
         left = QWidget()
         left_layout = QVBoxLayout(left)
 
-        self.device_table = QTableWidget(0, 4)
-        self.device_table.setHorizontalHeaderLabels(["Name", "Type", "Power (W)", "Qty"])
+        self.device_table = QTableWidget(0, 3)
+        self.device_table.setHorizontalHeaderLabels(["Name", "Type", "Power (W)"])
         self.device_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.device_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.device_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.device_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.device_table.verticalHeader().setVisible(False)
         self.device_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.device_table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed | QTableWidget.SelectedClicked)
@@ -1381,9 +1406,6 @@ class MainWindow(QMainWindow):
             it_p = QTableWidgetItem(f"{dev.power_w:g}")
             self.device_table.setItem(r, 2, it_p)
 
-            it_q = QTableWidgetItem(str(dev.quantity))
-            self.device_table.setItem(r, 3, it_q)
-
         self.device_table.blockSignals(False)
 
         # periods
@@ -1412,8 +1434,6 @@ class MainWindow(QMainWindow):
                 dev.name = item.text().strip() or dev.name
             elif c == 2:
                 dev.power_w = max(0.0, float(item.text()))
-            elif c == 3:
-                dev.quantity = max(1, int(float(item.text())))
         except Exception:
             pass
         self.recompute()
@@ -1438,7 +1458,7 @@ class MainWindow(QMainWindow):
     # ---------------------
 
     def add_device(self):
-        self.project.devices.append(Device(name="Device", dtype=DeviceType.SCHEDULED, power_w=20.0, quantity=1))
+        self.project.devices.append(Device(name="Device", dtype=DeviceType.SCHEDULED, power_w=20.0))
         self.refresh_tables()
         self.recompute()
 
