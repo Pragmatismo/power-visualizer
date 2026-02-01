@@ -784,12 +784,12 @@ class TimelineWidget(QWidget):
                 dev = self.project.devices[hit.device_index]
                 if 0 <= hit.item_index < len(dev.events):
                     dev.events.pop(hit.item_index)
-                    self.parent().recompute()  # main window call
+                    self._trigger_recompute()  # main window call
             elif hit.kind.startswith("interval"):
                 dev = self.project.devices[hit.device_index]
                 if 0 <= hit.item_index < len(dev.intervals):
                     dev.intervals.pop(hit.item_index)
-                    self.parent().recompute()
+                    self._trigger_recompute()
             return
 
         if e.button() != Qt.LeftButton:
@@ -808,12 +808,12 @@ class TimelineWidget(QWidget):
                 if dev.dtype == DeviceType.SCHEDULED:
                     # add a 30 min block by default
                     dev.intervals.append(Interval(m, min(MINUTES_PER_DAY, m + 30)).normalized())
-                    self.parent().recompute()
+                    self._trigger_recompute()
                     return
                 elif dev.dtype == DeviceType.EVENTS:
                     # add event with default duration 3 minutes, no fixed energy by default
                     dev.events.append(Event(m, 3, None).normalized())
-                    self.parent().recompute()
+                    self._trigger_recompute()
                     return
                 # always-on: do nothing
             return
@@ -833,7 +833,16 @@ class TimelineWidget(QWidget):
             self.drag_original = None
             self.hit = HitTest()
             self.setCursor(Qt.ArrowCursor)
-            self.parent().recompute()
+            self._trigger_recompute()
+
+    def _trigger_recompute(self):
+        win = self.window()
+        if hasattr(win, "recompute"):
+            win.recompute()
+            return
+        parent = self.parent()
+        if parent and hasattr(parent, "recompute"):
+            parent.recompute()
 
     def _device_index_from_pos(self, pos: QPoint) -> int:
         tl = self._timeline_rect()
@@ -1303,4 +1312,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
