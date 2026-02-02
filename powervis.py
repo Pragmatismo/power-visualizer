@@ -2059,6 +2059,7 @@ class TimelineWidget(QWidget):
                 name_metrics.horizontalAdvance(dev.name),
                 power_metrics.horizontalAdvance(f"{dev.power_w:g} W"),
             )
+        widest = max(widest, name_metrics.horizontalAdvance("Total Power"))
         self.left_label_w = max(160, widest + self.label_pad * 2)
 
     def _update_right_info_width(self):
@@ -2077,6 +2078,9 @@ class TimelineWidget(QWidget):
             metrics.horizontalAdvance(kwh_text),
             metrics.horizontalAdvance(cost_text),
         )
+        peak_value = max(self.sim.minute_total_w) if self.sim.minute_total_w else 0.0
+        peak_text = f"Peak: {peak_value:.0f} W"
+        text_width = max(text_width, metrics.horizontalAdvance(peak_text))
         diameter = max(6, self.row_h - 16)
         info_inner_width = 4 + diameter + 10 + text_width + 4
         self.right_info_w = max(180, info_inner_width + 12)
@@ -2105,7 +2109,15 @@ class TimelineWidget(QWidget):
     def sizeHint(self):
         if not self.project:
             return QSize(900, 500)
-        h = self.top_tariff_h + self.axis_h + (len(self.visible_device_indices) * (self.row_h + self.row_gap)) + 20
+        total_row_h = self._total_row_height()
+        h = (
+            self.top_tariff_h
+            + self.axis_h
+            + (len(self.visible_device_indices) * (self.row_h + self.row_gap))
+            + total_row_h
+            + self.row_gap
+            + 20
+        )
         return QSize(1100, max(500, h))
 
     def _timeline_rect(self) -> QRect:
@@ -2128,12 +2140,24 @@ class TimelineWidget(QWidget):
         y0 = tl.top() + idx * (self.row_h + self.row_gap)
         return QRect(tl.left(), y0, tl.width(), self.row_h)
 
+    def _total_row_height(self) -> int:
+        return max(self.row_h, self.row_h * 2 - 16)
+
+    def _total_row_rect(self) -> QRect:
+        tl = self._timeline_rect()
+        y0 = tl.top() + len(self.visible_device_indices) * (self.row_h + self.row_gap)
+        return QRect(tl.left(), y0, tl.width(), self._total_row_height())
+
     def _device_label_rect(self, idx: int) -> QRect:
         rr = self._row_rect(idx)
         return QRect(self.label_pad, rr.top(), self.left_label_w - self.label_pad * 2, rr.height())
 
     def _device_info_rect(self, idx: int) -> QRect:
         rr = self._row_rect(idx)
+        x = rr.right() + 6
+        return QRect(x, rr.top(), self.right_info_w - 12, rr.height())
+
+    def _total_info_rect(self, rr: QRect) -> QRect:
         x = rr.right() + 6
         return QRect(x, rr.top(), self.right_info_w - 12, rr.height())
 
@@ -2161,6 +2185,7 @@ class TimelineWidget(QWidget):
         for row_index, dev_index in enumerate(self.visible_device_indices):
             dev = self.project.devices[dev_index]
             self._paint_row(p, row_index, dev_index, dev)
+        self._paint_total_row(p)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2380,6 +2405,52 @@ class TimelineWidget(QWidget):
                    Qt.AlignLeft | Qt.AlignVCenter, f"▲ {kwh_text}")
         p.drawText(QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
                    Qt.AlignLeft | Qt.AlignVCenter, f"▼ {cost_text}")
+
+    def _paint_total_row(self, p: QPainter):
+        if not (self.project and self.sim):
+            return
+        rr = self._total_row_rect()
+        bg = QColor(28, 28, 32)
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRect(rr)
+
+        # label left
+        lr = QRect(self.label_pad, rr.top(), self.left_label_w - self.label_pad * 2, rr.height())
+        p.setPen(QColor(220, 220, 230))
+        p.setFont(self.name_font)
+        p.drawText(lr, Qt.AlignCenter, "Total Power")
+
+        # draw total power graph
+        total_w = self.sim.minute_total_w
+        peak = max(total_w) if total_w else 0.0
+        graph_h = max(1, rr.height() - 16)
+        base_y = rr.bottom() - 8
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(120, 200, 140, 200))
+        for minute in range(MINUTES_PER_DAY):
+            value = total_w[minute] if minute < len(total_w) else 0.0
+            ratio = (value / peak) if peak > 0 else 0.0
+            bar_h = int(ratio * graph_h)
+            if bar_h <= 0:
+                continue
+            x0 = self._minute_to_x(minute)
+            x1 = self._minute_to_x(minute + 1)
+            width = max(1, x1 - x0)
+            p.drawRect(QRect(x0, base_y - bar_h, width, bar_h))
+
+        p.setPen(QPen(QColor(55, 55, 62), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(rr)
+
+        info = self._total_info_rect(rr)
+        p.setPen(QColor(220, 220, 230))
+        p.setFont(self.info_font)
+        metrics = QFontMetrics(self.info_font)
+        line_h = metrics.height()
+        peak_text = f"Peak: {peak:.0f} W"
+        text_rect = QRect(info.left(), info.top(), info.width(), info.height())
+        p.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, peak_text)
 
     def _draw_block(
         self,
