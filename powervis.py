@@ -339,6 +339,7 @@ class SettingsModel:
     currency_symbol: str = "£"
     month_days: int = 30
     step_minutes: int = 1
+    mains_voltage: float = 240.0
 
     # Default UK-ish flat rate (roughly; user can change)
     base_rate_flat: float = 0.30  # £/kWh
@@ -356,12 +357,15 @@ class SettingsModel:
     tariff_minute_rates: Optional[List[float]] = None
     tariff_label: Optional[str] = None
     show_standing_charge: bool = False
+    show_amps: bool = False
+    show_total_power: bool = True
 
     def clone(self) -> "SettingsModel":
         return SettingsModel(
             currency_symbol=self.currency_symbol,
             month_days=self.month_days,
             step_minutes=self.step_minutes,
+            mains_voltage=self.mains_voltage,
             base_rate_flat=self.base_rate_flat,
             use_time_of_day=self.use_time_of_day,
             offpeak_rate=self.offpeak_rate,
@@ -376,12 +380,15 @@ class SettingsModel:
             tariff_minute_rates=list(self.tariff_minute_rates) if self.tariff_minute_rates else None,
             tariff_label=self.tariff_label,
             show_standing_charge=self.show_standing_charge,
+            show_amps=self.show_amps,
+            show_total_power=self.show_total_power,
         )
 
     def to_qsettings(self, qs: QSettings):
         qs.setValue("currency_symbol", self.currency_symbol)
         qs.setValue("month_days", self.month_days)
         qs.setValue("step_minutes", self.step_minutes)
+        qs.setValue("mains_voltage", self.mains_voltage)
 
         qs.setValue("base_rate_flat", self.base_rate_flat)
 
@@ -395,6 +402,8 @@ class SettingsModel:
         qs.setValue("free_end_min", self.free_rule.end_min)
         qs.setValue("free_kw_threshold", self.free_rule.free_kw_threshold)
         qs.setValue("show_standing_charge", self.show_standing_charge)
+        qs.setValue("show_amps", self.show_amps)
+        qs.setValue("show_total_power", self.show_total_power)
 
         qs.setValue("has_run_before", True)
 
@@ -404,6 +413,7 @@ class SettingsModel:
         sm.currency_symbol = qs.value("currency_symbol", sm.currency_symbol)
         sm.month_days = int(qs.value("month_days", sm.month_days))
         sm.step_minutes = int(qs.value("step_minutes", sm.step_minutes))
+        sm.mains_voltage = float(qs.value("mains_voltage", sm.mains_voltage))
 
         sm.base_rate_flat = float(qs.value("base_rate_flat", sm.base_rate_flat))
 
@@ -421,6 +431,12 @@ class SettingsModel:
         sm.free_rule = fr
         sm.show_standing_charge = (
             str(qs.value("show_standing_charge", sm.show_standing_charge)).lower() == "true"
+        )
+        sm.show_amps = (
+            str(qs.value("show_amps", sm.show_amps)).lower() == "true"
+        )
+        sm.show_total_power = (
+            str(qs.value("show_total_power", sm.show_total_power)).lower() == "true"
         )
         # enforce the constraints you chose
         sm.month_days = 30
@@ -766,6 +782,13 @@ class SettingsDialog(QDialog):
         self.currency_symbol.setMaxLength(4)
         form.addRow("Currency symbol", self.currency_symbol)
 
+        self.mains_voltage = QDoubleSpinBox()
+        self.mains_voltage.setDecimals(1)
+        self.mains_voltage.setRange(1.0, 1000.0)
+        self.mains_voltage.setSingleStep(1.0)
+        self.mains_voltage.setValue(self.model.mains_voltage)
+        form.addRow("Mains voltage (V)", self.mains_voltage)
+
         # Tariff group
         tariff_group = QGroupBox("Electricity tariff")
         tariff_layout = QFormLayout(tariff_group)
@@ -847,6 +870,7 @@ class SettingsDialog(QDialog):
         m.currency_symbol = self.currency_symbol.text().strip() or "£"
         m.month_days = 30
         m.step_minutes = 1
+        m.mains_voltage = float(self.mains_voltage.value())
 
         m.use_time_of_day = self.use_tod.isChecked()
         m.base_rate_flat = float(self.flat_rate.value())
@@ -2059,7 +2083,8 @@ class TimelineWidget(QWidget):
                 name_metrics.horizontalAdvance(dev.name),
                 power_metrics.horizontalAdvance(f"{dev.power_w:g} W"),
             )
-        widest = max(widest, name_metrics.horizontalAdvance("Total Power"))
+        if self.settings and self.settings.show_total_power:
+            widest = max(widest, name_metrics.horizontalAdvance("Total Power"))
         self.left_label_w = max(160, widest + self.label_pad * 2)
 
     def _update_right_info_width(self):
@@ -2078,9 +2103,14 @@ class TimelineWidget(QWidget):
             metrics.horizontalAdvance(kwh_text),
             metrics.horizontalAdvance(cost_text),
         )
-        peak_value = max(self.sim.minute_total_w) if self.sim.minute_total_w else 0.0
-        peak_text = f"Peak: {peak_value:.0f} W"
-        text_width = max(text_width, metrics.horizontalAdvance(peak_text))
+        if self.settings.show_total_power:
+            peak_value = max(self.sim.minute_total_w) if self.sim.minute_total_w else 0.0
+            peak_text = f"Peak: {peak_value:.0f} W"
+            text_width = max(text_width, metrics.horizontalAdvance(peak_text))
+            if self.settings.show_amps:
+                amps = peak_value / max(self.settings.mains_voltage, 0.1)
+                amp_text = f"Peak: {amps:.1f} A"
+                text_width = max(text_width, metrics.horizontalAdvance(amp_text))
         diameter = max(6, self.row_h - 16)
         info_inner_width = 4 + diameter + 10 + text_width + 4
         self.right_info_w = max(180, info_inner_width + 12)
@@ -2110,12 +2140,13 @@ class TimelineWidget(QWidget):
         if not self.project:
             return QSize(900, 500)
         total_row_h = self._total_row_height()
+        total_row_gap = self.row_gap if total_row_h > 0 else 0
         h = (
             self.top_tariff_h
             + self.axis_h
             + (len(self.visible_device_indices) * (self.row_h + self.row_gap))
             + total_row_h
-            + self.row_gap
+            + total_row_gap
             + 20
         )
         return QSize(1100, max(500, h))
@@ -2141,6 +2172,8 @@ class TimelineWidget(QWidget):
         return QRect(tl.left(), y0, tl.width(), self.row_h)
 
     def _total_row_height(self) -> int:
+        if not (self.settings and self.settings.show_total_power):
+            return 0
         return max(self.row_h, self.row_h * 2 - 16)
 
     def _total_row_rect(self) -> QRect:
@@ -2407,7 +2440,7 @@ class TimelineWidget(QWidget):
                    Qt.AlignLeft | Qt.AlignVCenter, f"▼ {cost_text}")
 
     def _paint_total_row(self, p: QPainter):
-        if not (self.project and self.sim):
+        if not (self.project and self.sim and self.settings and self.settings.show_total_power):
             return
         rr = self._total_row_rect()
         bg = QColor(28, 28, 32)
@@ -2448,9 +2481,20 @@ class TimelineWidget(QWidget):
         p.setFont(self.info_font)
         metrics = QFontMetrics(self.info_font)
         line_h = metrics.height()
-        peak_text = f"Peak: {peak:.0f} W"
         text_rect = QRect(info.left(), info.top(), info.width(), info.height())
-        p.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, peak_text)
+        if self.settings.show_amps:
+            amps = peak / max(self.settings.mains_voltage, 0.1)
+            total_h = line_h * 2
+            start_y = text_rect.top() + (text_rect.height() - total_h) // 2
+            peak_w_text = f"Peak: {peak:.0f} W"
+            peak_a_text = f"Peak: {amps:.1f} A"
+            p.drawText(QRect(text_rect.left(), start_y, text_rect.width(), line_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, peak_w_text)
+            p.drawText(QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
+                       Qt.AlignLeft | Qt.AlignVCenter, peak_a_text)
+        else:
+            peak_text = f"Peak: {peak:.0f} W"
+            p.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, peak_text)
 
     def _draw_block(
         self,
@@ -2858,13 +2902,27 @@ class MainWindow(QMainWindow):
         act_select_tariff = QAction("Select Tariff…", self)
         tariffm.addAction(act_import_tariff)
         tariffm.addAction(act_select_tariff)
-        tariffm.addSeparator()
+        act_import_tariff.triggered.connect(self.import_tariffs)
+        act_select_tariff.triggered.connect(self.select_tariff)
+
+        viewm = mb.addMenu("&View")
+        act_show_total_power = QAction("Show Total Power", self)
+        act_show_total_power.setCheckable(True)
+        act_show_total_power.setChecked(self.settings_model.show_total_power)
+        viewm.addAction(act_show_total_power)
+
+        act_show_amps = QAction("Show Amps", self)
+        act_show_amps.setCheckable(True)
+        act_show_amps.setChecked(self.settings_model.show_amps)
+        viewm.addAction(act_show_amps)
+
+        viewm.addSeparator()
         act_show_standing = QAction("Show Standing Charge", self)
         act_show_standing.setCheckable(True)
         act_show_standing.setChecked(self.settings_model.show_standing_charge)
-        tariffm.addAction(act_show_standing)
-        act_import_tariff.triggered.connect(self.import_tariffs)
-        act_select_tariff.triggered.connect(self.select_tariff)
+        viewm.addAction(act_show_standing)
+        act_show_total_power.toggled.connect(self._toggle_total_power)
+        act_show_amps.toggled.connect(self._toggle_show_amps)
         act_show_standing.toggled.connect(self._toggle_standing_charge)
 
         helpm = mb.addMenu("&Help")
@@ -3200,6 +3258,16 @@ class MainWindow(QMainWindow):
 
     def _toggle_standing_charge(self, enabled: bool):
         self.settings_model.show_standing_charge = enabled
+        self.settings_model.to_qsettings(self.qs)
+        self.recompute()
+
+    def _toggle_show_amps(self, enabled: bool):
+        self.settings_model.show_amps = enabled
+        self.settings_model.to_qsettings(self.qs)
+        self.recompute()
+
+    def _toggle_total_power(self, enabled: bool):
+        self.settings_model.show_total_power = enabled
         self.settings_model.to_qsettings(self.qs)
         self.recompute()
 
