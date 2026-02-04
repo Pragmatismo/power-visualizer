@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QComboBox, QSpinBox, QDoubleSpinBox,
     QDialog, QFormLayout, QDialogButtonBox, QGroupBox, QCheckBox,
     QLineEdit, QHeaderView, QListWidget, QListWidgetItem, QScrollArea,
-    QInputDialog
+    QInputDialog, QAbstractScrollArea
 )
 
 # =========================
@@ -2142,10 +2142,13 @@ class HitTest:
     anchor_minute: int = 0
 
 
-class TimelineWidget(QWidget):
+class TimelineWidget(QAbstractScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.project: Optional[Project] = None
         self.settings: Optional[SettingsModel] = None
@@ -2165,6 +2168,10 @@ class TimelineWidget(QWidget):
         self.axis_label_padding = 4
         self.axis_labels_rotated = False
         self.axis_label_rot_height = 0
+        self.pixels_per_minute = 1.0
+        self.scroll_offset_px = 0
+        self.timeline_start_min = 0
+        self.timeline_end_min = MINUTES_PER_DAY
 
         # interaction state
         self.hit = HitTest()
@@ -2185,6 +2192,7 @@ class TimelineWidget(QWidget):
         self.power_font = QFont("Sans", 9)
         self.info_font = QFont("Sans", 11)
         self.setMinimumHeight(400)
+        self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
 
     def set_data(self, project: Project, settings: SettingsModel, sim: SimResult):
         self.project = project
@@ -2194,6 +2202,7 @@ class TimelineWidget(QWidget):
         self._update_left_label_width()
         self._update_right_info_width()
         self._update_axis_layout()
+        self._update_scrollbar()
         self.updateGeometry()
         self.update()
 
@@ -2256,8 +2265,7 @@ class TimelineWidget(QWidget):
             self.axis_labels_rotated = False
             self.axis_h = 32
             return
-        tl = self._timeline_rect()
-        tick_spacing = max(1, tl.width() / 24)
+        tick_spacing = max(1, int(self.pixels_per_minute * 60))
         metrics = QFontMetrics(self.font)
         label_width = metrics.horizontalAdvance("00:00")
         label_height = metrics.height()
@@ -2288,19 +2296,23 @@ class TimelineWidget(QWidget):
         return QSize(1100, max(500, h))
 
     def _timeline_rect(self) -> QRect:
+        vp = self.viewport().rect()
         return QRect(self.left_label_w, self.top_tariff_h + self.axis_h,
-                     self.width() - self.left_label_w - self.right_info_w - 12,
-                     self.height() - self.top_tariff_h - self.axis_h - 12)
+                     vp.width() - self.left_label_w - self.right_info_w - 12,
+                     vp.height() - self.top_tariff_h - self.axis_h - 12)
 
     def _minute_to_x(self, minute: int) -> int:
         tl = self._timeline_rect()
-        frac = minute / MINUTES_PER_DAY
-        return int(tl.left() + frac * tl.width())
+        offset = self._scroll_offset()
+        return int(
+            tl.left() + (minute - self.timeline_start_min) * self.pixels_per_minute - offset
+        )
 
     def _x_to_minute(self, x: int) -> int:
         tl = self._timeline_rect()
-        frac = (x - tl.left()) / max(1, tl.width())
-        return clamp(int(frac * MINUTES_PER_DAY), 0, MINUTES_PER_DAY - 1)
+        offset = self._scroll_offset()
+        minute = self.timeline_start_min + (x - tl.left() + offset) / max(self.pixels_per_minute, 0.01)
+        return clamp(int(minute), self.timeline_start_min, self.timeline_end_min - 1)
 
     def _row_rect(self, idx: int) -> QRect:
         tl = self._timeline_rect()
@@ -2331,17 +2343,55 @@ class TimelineWidget(QWidget):
         return QRect(x, rr.top(), self.right_info_w - 12, rr.height())
 
     def _tariff_rect(self) -> QRect:
-        return QRect(self.left_label_w, 6, self.width() - self.left_label_w - self.right_info_w - 12, self.top_tariff_h - 8)
+        vp = self.viewport().rect()
+        return QRect(self.left_label_w, 6, vp.width() - self.left_label_w - self.right_info_w - 12, self.top_tariff_h - 8)
+
+    def _scroll_offset(self) -> int:
+        return self.horizontalScrollBar().value()
+
+    def _content_width(self) -> int:
+        return max(1, int((self.timeline_end_min - self.timeline_start_min) * self.pixels_per_minute))
+
+    def _update_scrollbar(self):
+        tl = self._timeline_rect()
+        visible_width = max(1, tl.width())
+        max_offset = max(0, self._content_width() - visible_width)
+        bar = self.horizontalScrollBar()
+        bar.setPageStep(visible_width)
+        bar.setRange(0, max_offset)
+        if bar.value() > max_offset:
+            bar.setValue(max_offset)
+
+    def _on_scroll(self, value: int):
+        self.scroll_offset_px = value
+        self.update()
+
+    def set_pixels_per_minute(self, pixels_per_minute: float):
+        self.pixels_per_minute = max(0.1, pixels_per_minute)
+        self._update_axis_layout()
+        self._update_scrollbar()
+        self.update()
+
+    def set_time_range(self, start_min: int, end_min: int):
+        start = int(start_min)
+        end = int(end_min)
+        if end <= start:
+            end = start + 1
+        self.timeline_start_min = start
+        self.timeline_end_min = end
+        self._update_axis_layout()
+        self._update_scrollbar()
+        self.update()
 
     def paintEvent(self, event):
-        p = QPainter(self)
+        p = QPainter(self.viewport())
         p.setRenderHint(QPainter.Antialiasing, False)
-        p.fillRect(self.rect(), QColor(25, 25, 28))
+        p.fillRect(self.viewport().rect(), QColor(25, 25, 28))
         p.setFont(self.font)
 
         if not (self.project and self.settings and self.sim):
             p.setPen(QColor(220, 220, 220))
-            p.drawText(self.rect(), Qt.AlignCenter, "No project loaded.")
+            p.drawText(self.viewport().rect(), Qt.AlignCenter, "No project loaded.")
             return
 
         # Draw tariff bar
@@ -2359,6 +2409,7 @@ class TimelineWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_axis_layout()
+        self._update_scrollbar()
 
     def _paint_tariff(self, p: QPainter):
         tr = self._tariff_rect()
@@ -2452,11 +2503,17 @@ class TimelineWidget(QWidget):
         metrics = QFontMetrics(self.font)
         p.setPen(QColor(160, 160, 170))
         # hour ticks
-        for hour in range(25):
-            m = hour * 60
+        visible_start = self._x_to_minute(tl.left())
+        visible_end = self._x_to_minute(tl.right())
+        start_tick = (visible_start // 60) * 60
+        if start_tick < visible_start:
+            start_tick += 60
+        end_tick = min(self.timeline_end_min, visible_end + 60)
+        for m in range(start_tick, end_tick + 1, 60):
             x = self._minute_to_x(m)
             p.drawLine(x, tick_top, x, axis_baseline)
-            if hour < 24:
+            hour = (m // 60) % 24
+            if m < self.timeline_end_min:
                 label = f"{hour:02d}:00"
                 if self.axis_labels_rotated:
                     p.save()
