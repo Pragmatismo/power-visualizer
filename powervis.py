@@ -1,4 +1,5 @@
 import copy
+import datetime
 import json
 from html import escape
 import math
@@ -6,7 +7,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple, Dict, Iterable, Union
 
 from PySide6.QtCore import (
     Qt, QRect, QRectF, QPoint, QPointF, QSize, QSettings, QTimer
@@ -28,6 +29,15 @@ from PySide6.QtWidgets import (
 # =========================
 
 MINUTES_PER_DAY = 24 * 60
+DAY_NAME_TO_INDEX = {
+    "mon": 0,
+    "tue": 1,
+    "wed": 2,
+    "thu": 3,
+    "fri": 4,
+    "sat": 5,
+    "sun": 6,
+}
 
 
 def clamp(v, lo, hi):
@@ -146,6 +156,39 @@ def is_all_days(day_sets: List[dict]) -> bool:
         if all_days.issubset(days):
             return True
     return False
+
+
+def day_index_from_date(day: Optional[Union[datetime.date, int]]) -> int:
+    if day is None:
+        return 0
+    if isinstance(day, datetime.date):
+        return day.weekday()
+    try:
+        return int(day) % 7
+    except (TypeError, ValueError):
+        return 0
+
+
+def days_from_day_sets(day_sets: List[dict]) -> Optional[Iterable[int]]:
+    if not day_sets:
+        return None
+    day_indices: List[int] = []
+    for day_set in day_sets:
+        for day in day_set.get("days", []):
+            index = DAY_NAME_TO_INDEX.get(str(day).lower())
+            if index is not None and index not in day_indices:
+                day_indices.append(index)
+    return day_indices
+
+
+def tariff_day_rates(
+    settings: "SettingsModel",
+    day: Optional[Union[datetime.date, int]] = None,
+) -> Optional[List[float]]:
+    if not settings.tariff_minute_rates:
+        return None
+    day_index = day_index_from_date(day)
+    return settings.tariff_minute_rates.get(day_index) or settings.tariff_minute_rates.get(0)
 
 
 def is_all_day_rate(rate: dict) -> bool:
@@ -354,7 +397,7 @@ class SettingsModel:
     free_rule: FreeRule = field(default_factory=FreeRule)
 
     # Optional imported tariff schedule
-    tariff_minute_rates: Optional[List[float]] = None
+    tariff_minute_rates: Optional[Dict[int, List[float]]] = None
     tariff_label: Optional[str] = None
     show_standing_charge: bool = False
     show_amps: bool = False
@@ -377,7 +420,11 @@ class SettingsModel:
                 end_min=self.free_rule.end_min,
                 free_kw_threshold=self.free_rule.free_kw_threshold,
             ),
-            tariff_minute_rates=list(self.tariff_minute_rates) if self.tariff_minute_rates else None,
+            tariff_minute_rates=(
+                {day: list(rates) for day, rates in self.tariff_minute_rates.items()}
+                if self.tariff_minute_rates
+                else None
+            ),
             tariff_label=self.tariff_label,
             show_standing_charge=self.show_standing_charge,
             show_amps=self.show_amps,
@@ -523,10 +570,16 @@ class SimResult:
     minute_total_w: List[float]  # length 1440
 
 
-def tariff_rate_for_minute(settings: SettingsModel, minute: int) -> float:
+def tariff_rate_for_minute(
+    settings: SettingsModel,
+    minute: int,
+    day: Optional[Union[datetime.date, int]] = None,
+) -> float:
     """Return £/kWh rate for the minute (base schedule only)."""
     if settings.tariff_minute_rates:
-        return settings.tariff_minute_rates[clamp(minute, 0, MINUTES_PER_DAY - 1)]
+        day_rates = tariff_day_rates(settings, day)
+        if day_rates:
+            return day_rates[clamp(minute, 0, MINUTES_PER_DAY - 1)]
     if not settings.use_time_of_day:
         return settings.base_rate_flat
     if is_minute_in_window(minute, settings.offpeak_start_min, settings.offpeak_end_min):
@@ -534,13 +587,19 @@ def tariff_rate_for_minute(settings: SettingsModel, minute: int) -> float:
     return settings.base_rate_flat
 
 
-def tariff_segments(settings: SettingsModel) -> List[Tuple[int, int, float]]:
+def tariff_segments(
+    settings: SettingsModel,
+    day: Optional[Union[datetime.date, int]] = None,
+) -> List[Tuple[int, int, float]]:
     if settings.tariff_minute_rates:
         segments: List[Tuple[int, int, float]] = []
-        current_rate = settings.tariff_minute_rates[0]
+        day_rates = tariff_day_rates(settings, day)
+        if not day_rates:
+            return segments
+        current_rate = day_rates[0]
         start = 0
         for minute in range(1, MINUTES_PER_DAY + 1):
-            next_rate = None if minute == MINUTES_PER_DAY else settings.tariff_minute_rates[minute]
+            next_rate = None if minute == MINUTES_PER_DAY else day_rates[minute]
             if minute == MINUTES_PER_DAY or next_rate != current_rate:
                 segments.append((start, minute, current_rate))
                 start = minute
@@ -549,13 +608,13 @@ def tariff_segments(settings: SettingsModel) -> List[Tuple[int, int, float]]:
     if not settings.use_time_of_day:
         return [(0, MINUTES_PER_DAY, settings.base_rate_flat)]
     segments: List[Tuple[int, int, float]] = []
-    current_rate = tariff_rate_for_minute(settings, 0)
+    current_rate = tariff_rate_for_minute(settings, 0, day)
     start = 0
     for minute in range(1, MINUTES_PER_DAY + 1):
         if minute == MINUTES_PER_DAY:
             next_rate = None
         else:
-            next_rate = tariff_rate_for_minute(settings, minute)
+            next_rate = tariff_rate_for_minute(settings, minute, day)
         if minute == MINUTES_PER_DAY or next_rate != current_rate:
             segments.append((start, minute, current_rate))
             start = minute
@@ -563,9 +622,9 @@ def tariff_segments(settings: SettingsModel) -> List[Tuple[int, int, float]]:
     return segments
 
 
-def build_tariff_minute_rates(tariff: dict) -> List[float]:
-    minute_rates = [0.0] * MINUTES_PER_DAY
-    minute_priority = [-10**9] * MINUTES_PER_DAY
+def build_tariff_minute_rates(tariff: dict) -> Dict[int, List[float]]:
+    minute_rates = {day: [0.0] * MINUTES_PER_DAY for day in range(7)}
+    minute_priority = {day: [-10**9] * MINUTES_PER_DAY for day in range(7)}
     rates = tariff.get("rates") or []
     for rate in rates:
         rate_value = rate.get("rate_gbp_per_kwh")
@@ -574,6 +633,12 @@ def build_tariff_minute_rates(tariff: dict) -> List[float]:
         priority = int(rate.get("priority", 0))
         schedule = rate.get("schedule") or {}
         time_ranges = schedule.get("time_ranges") or []
+        day_sets = schedule.get("day_sets") or []
+        applicable_days = days_from_day_sets(day_sets)
+        if applicable_days is None:
+            applicable_days = range(7)
+        elif not applicable_days:
+            continue
         apply_all_day = False
         if not time_ranges:
             apply_all_day = True
@@ -585,16 +650,18 @@ def build_tariff_minute_rates(tariff: dict) -> List[float]:
             if start == end:
                 apply_all_day = True
                 continue
-            for minute in range(MINUTES_PER_DAY):
-                if is_minute_in_window(minute, start, end):
-                    if priority >= minute_priority[minute]:
-                        minute_priority[minute] = priority
-                        minute_rates[minute] = float(rate_value)
+            for day_index in applicable_days:
+                for minute in range(MINUTES_PER_DAY):
+                    if is_minute_in_window(minute, start, end):
+                        if priority >= minute_priority[day_index][minute]:
+                            minute_priority[day_index][minute] = priority
+                            minute_rates[day_index][minute] = float(rate_value)
         if apply_all_day:
-            for minute in range(MINUTES_PER_DAY):
-                if priority >= minute_priority[minute]:
-                    minute_priority[minute] = priority
-                    minute_rates[minute] = float(rate_value)
+            for day_index in applicable_days:
+                for minute in range(MINUTES_PER_DAY):
+                    if priority >= minute_priority[day_index][minute]:
+                        minute_priority[day_index][minute] = priority
+                        minute_rates[day_index][minute] = float(rate_value)
     return minute_rates
 
 
