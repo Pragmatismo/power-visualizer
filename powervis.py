@@ -3060,14 +3060,16 @@ class MainWindow(QMainWindow):
         self.active_tariff_entry: Optional[TariffEntry] = None
         self.current_date = datetime.date.today()
         self.zoom_levels = [
-            60,
-            3 * 60,
             6 * 60,
             12 * 60,
             24 * 60,
+            2 * 24 * 60,
+            5 * 24 * 60,
             7 * 24 * 60,
+            14 * 24 * 60,
+            30 * 24 * 60,
         ]
-        self.zoom_index = 4
+        self.zoom_index = 2
 
         # project state
         self.project = Project(devices=[
@@ -3474,9 +3476,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.next_day_btn)
         layout.addWidget(self.next_month_btn)
         layout.addSpacing(12)
+        layout.addWidget(self.zoom_label)
         layout.addWidget(self.zoom_out_btn)
         layout.addWidget(self.zoom_in_btn)
-        layout.addWidget(self.zoom_label)
 
         self._update_date_display()
         self._update_zoom_display()
