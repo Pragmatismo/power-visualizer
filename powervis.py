@@ -10,18 +10,18 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Tuple, Dict, Iterable, Union
 
 from PySide6.QtCore import (
-    Qt, QRect, QRectF, QPoint, QPointF, QSize, QSettings, QTimer
+    Qt, QRect, QRectF, QPoint, QPointF, QSize, QSettings, QTimer, QEvent, Signal, QDate
 )
 from PySide6.QtGui import (
     QAction, QBrush, QColor, QFont, QPainter, QPen, QCursor, QFontMetrics
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTableWidget, QTableWidgetItem, QPushButton, QLabel,
+    QTableWidget, QTableWidgetItem, QPushButton, QLabel, QToolButton,
     QFileDialog, QMessageBox, QComboBox, QSpinBox, QDoubleSpinBox,
     QDialog, QFormLayout, QDialogButtonBox, QGroupBox, QCheckBox,
     QLineEdit, QHeaderView, QListWidget, QListWidgetItem, QScrollArea,
-    QInputDialog, QAbstractScrollArea
+    QInputDialog, QAbstractScrollArea, QCalendarWidget, QSizePolicy
 )
 
 # =========================
@@ -2153,6 +2153,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.project: Optional[Project] = None
         self.settings: Optional[SettingsModel] = None
         self.sim: Optional[SimResult] = None
+        self.reference_date: Optional[datetime.date] = None
         self.visible_device_indices: List[int] = []
 
         # layout constants
@@ -2194,10 +2195,17 @@ class TimelineWidget(QAbstractScrollArea):
         self.setMinimumHeight(400)
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
 
-    def set_data(self, project: Project, settings: SettingsModel, sim: SimResult):
+    def set_data(
+        self,
+        project: Project,
+        settings: SettingsModel,
+        sim: SimResult,
+        day: Optional[datetime.date] = None,
+    ):
         self.project = project
         self.settings = settings
         self.sim = sim
+        self.reference_date = day
         self._update_visible_devices()
         self._update_left_label_width()
         self._update_right_info_width()
@@ -2352,6 +2360,10 @@ class TimelineWidget(QAbstractScrollArea):
     def _content_width(self) -> int:
         return max(1, int((self.timeline_end_min - self.timeline_start_min) * self.pixels_per_minute))
 
+    def _day_count(self) -> int:
+        total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
+        return max(1, math.ceil(total_minutes / MINUTES_PER_DAY))
+
     def _update_scrollbar(self):
         tl = self._timeline_rect()
         visible_width = max(1, tl.width())
@@ -2417,47 +2429,59 @@ class TimelineWidget(QAbstractScrollArea):
         p.setBrush(QColor(12, 20, 40))
         p.drawRect(tr)
 
-        # base rate visualization
-        for hour in range(24):
-            m0 = hour * 60
-            m1 = (hour + 1) * 60
-            r = tariff_rate_for_minute(self.settings, m0)
-            # map rate to brightness (simple)
-            # bigger rate -> brighter
-            base = clamp(int(40 + 180 * r), 40, 200)
-            col = QColor(
-                clamp(15 + int(40 * r), 15, 80),
-                clamp(30 + int(60 * r), 30, 120),
-                clamp(90 + base, 90, 220),
-            )
-            x0 = self._minute_to_x(m0)
-            x1 = self._minute_to_x(m1)
-            p.setBrush(col)
-            p.drawRect(QRect(x0, tr.top(), x1 - x0, tr.height()))
-
+        day_count = self._day_count()
         segment_label = f"{self.settings.currency_symbol}{{rate:.2f}}/kWh"
-        for start_min, end_min, rate in tariff_segments(self.settings):
-            x0 = self._minute_to_x(start_min)
-            x1 = self._minute_to_x(end_min)
-            if x1 - x0 < 40:
-                continue
-            label_rect = QRect(x0 + 4, tr.top(), x1 - x0 - 8, tr.height())
-            p.setFont(self.tariff_font)
-            p.setPen(QColor(230, 235, 245))
-            p.drawText(label_rect, Qt.AlignCenter, segment_label.format(rate=rate))
+        for day_offset in range(day_count):
+            day_start = day_offset * MINUTES_PER_DAY
+            day = None
+            if self.reference_date:
+                day = self.reference_date + datetime.timedelta(days=day_offset)
+
+            # base rate visualization
+            for hour in range(24):
+                m0 = day_start + hour * 60
+                m1 = day_start + (hour + 1) * 60
+                r = tariff_rate_for_minute(self.settings, hour * 60, day)
+                # map rate to brightness (simple)
+                # bigger rate -> brighter
+                base = clamp(int(40 + 180 * r), 40, 200)
+                col = QColor(
+                    clamp(15 + int(40 * r), 15, 80),
+                    clamp(30 + int(60 * r), 30, 120),
+                    clamp(90 + base, 90, 220),
+                )
+                x0 = self._minute_to_x(m0)
+                x1 = self._minute_to_x(m1)
+                p.setBrush(col)
+                p.drawRect(QRect(x0, tr.top(), x1 - x0, tr.height()))
+
+            for start_min, end_min, rate in tariff_segments(self.settings, day):
+                x0 = self._minute_to_x(day_start + start_min)
+                x1 = self._minute_to_x(day_start + end_min)
+                if x1 - x0 < 40:
+                    continue
+                label_rect = QRect(x0 + 4, tr.top(), x1 - x0 - 8, tr.height())
+                p.setFont(self.tariff_font)
+                p.setPen(QColor(230, 235, 245))
+                p.drawText(label_rect, Qt.AlignCenter, segment_label.format(rate=rate))
 
         # free overlay
         fr = self.settings.free_rule.normalized()
         if fr.enabled:
-            x0 = self._minute_to_x(fr.start_min)
-            x1 = self._minute_to_x(fr.end_min)
-            overlay = QColor(80, 160, 80, 140)
-            p.setBrush(overlay)
-            p.drawRect(QRect(x0, tr.top(), x1 - x0, tr.height()))
-            p.setFont(self.tariff_font)
-            p.setPen(QColor(230, 235, 245))
-            p.drawText(QRect(x0, tr.top(), x1 - x0, tr.height()), Qt.AlignCenter,
-                       f"FREE ≤ {fr.free_kw_threshold:.1f} kW")
+            for day_offset in range(day_count):
+                day_start = day_offset * MINUTES_PER_DAY
+                x0 = self._minute_to_x(day_start + fr.start_min)
+                x1 = self._minute_to_x(day_start + fr.end_min)
+                overlay = QColor(80, 160, 80, 140)
+                p.setBrush(overlay)
+                p.drawRect(QRect(x0, tr.top(), x1 - x0, tr.height()))
+                p.setFont(self.tariff_font)
+                p.setPen(QColor(230, 235, 245))
+                p.drawText(
+                    QRect(x0, tr.top(), x1 - x0, tr.height()),
+                    Qt.AlignCenter,
+                    f"FREE ≤ {fr.free_kw_threshold:.1f} kW",
+                )
 
         # border + label
         p.setPen(QPen(QColor(120, 120, 130), 1))
@@ -2557,7 +2581,14 @@ class TimelineWidget(QAbstractScrollArea):
         p.setPen(Qt.NoPen)
 
         if dev.dtype == DeviceType.ALWAYS:
-            self._draw_block(p, rr, 0, MINUTES_PER_DAY, QColor(140, 140, 200, 180), hover=False)
+            self._draw_block(
+                p,
+                rr,
+                0,
+                self.timeline_end_min,
+                QColor(140, 140, 200, 180),
+                hover=False,
+            )
 
         elif dev.dtype == DeviceType.SCHEDULED:
             for j, iv in enumerate(dev.intervals):
@@ -2568,15 +2599,20 @@ class TimelineWidget(QAbstractScrollArea):
                     and self.hover_hit.item_index == j
                 )
                 duration_text = format_duration_hhmm(ivn.end_min - ivn.start_min)
-                self._draw_block(
-                    p,
-                    rr,
-                    ivn.start_min,
-                    ivn.end_min,
-                    QColor(100, 170, 240, 190),
-                    hover=hover,
-                    label_text=duration_text,
-                )
+                for day_offset in range(self._day_count()):
+                    start_min = day_offset * MINUTES_PER_DAY + ivn.start_min
+                    end_min = day_offset * MINUTES_PER_DAY + ivn.end_min
+                    if start_min >= self.timeline_end_min:
+                        continue
+                    self._draw_block(
+                        p,
+                        rr,
+                        start_min,
+                        min(end_min, self.timeline_end_min),
+                        QColor(100, 170, 240, 190),
+                        hover=hover and day_offset == 0,
+                        label_text=duration_text,
+                    )
 
         elif dev.dtype == DeviceType.EVENTS:
             for j, ev in enumerate(dev.events):
@@ -2586,7 +2622,18 @@ class TimelineWidget(QAbstractScrollArea):
                     and self.hover_hit.device_index == dev_index
                     and self.hover_hit.item_index == j
                 )
-                self._draw_event(p, rr, evn.start_min, evn.duration_min, QColor(240, 170, 90, 200), hover=hover)
+                for day_offset in range(self._day_count()):
+                    start_min = day_offset * MINUTES_PER_DAY + evn.start_min
+                    if start_min >= self.timeline_end_min:
+                        continue
+                    self._draw_event(
+                        p,
+                        rr,
+                        start_min,
+                        evn.duration_min,
+                        QColor(240, 170, 90, 200),
+                        hover=hover and day_offset == 0,
+                    )
 
         # row border
         p.setPen(QPen(QColor(55, 55, 62), 1))
@@ -2981,6 +3028,26 @@ class TimelineWidget(QAbstractScrollArea):
 # Main window UI
 # =========================
 
+class DateDisplayButton(QPushButton):
+    clickedSingle = Signal()
+    doubleClicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._suppress_click = False
+
+    def mouseDoubleClickEvent(self, event):
+        self._suppress_click = True
+        self.doubleClicked.emit()
+        super().mouseDoubleClickEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and not self._suppress_click:
+            self.clickedSingle.emit()
+        self._suppress_click = False
+        super().mouseReleaseEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2991,6 +3058,16 @@ class MainWindow(QMainWindow):
         self.tariff_documents: List[TariffDocument] = []
         self.current_tariff_doc: Optional[TariffDocument] = None
         self.active_tariff_entry: Optional[TariffEntry] = None
+        self.current_date = datetime.date.today()
+        self.zoom_levels = [
+            60,
+            3 * 60,
+            6 * 60,
+            12 * 60,
+            24 * 60,
+            7 * 24 * 60,
+        ]
+        self.zoom_index = 4
 
         # project state
         self.project = Project(devices=[
@@ -3031,6 +3108,7 @@ class MainWindow(QMainWindow):
 
         self.timeline = TimelineWidget(parent=self)
         root_layout.addWidget(self.timeline, stretch=1)
+        self._build_timeline_controls()
 
         self.summary = QLabel("")
         self.summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -3048,6 +3126,7 @@ class MainWindow(QMainWindow):
 
         self.refresh_tables()
         self.recompute()
+        QTimer.singleShot(0, self._apply_zoom)
 
     def _build_menu(self):
         mb = self.menuBar()
@@ -3332,9 +3411,177 @@ class MainWindow(QMainWindow):
     # ---------------------
 
     def recompute(self):
-        sim = simulate_day(self.project, self.settings_model)
-        self.timeline.set_data(self.project, self.settings_model, sim)
+        sim = simulate_day(self.project, self.settings_model, self.current_date)
+        self.timeline.set_data(self.project, self.settings_model, sim, day=self.current_date)
         self._update_summary(sim)
+
+    def _build_timeline_controls(self):
+        self.timeline_controls = QWidget(self.timeline.viewport())
+        self.timeline_controls.setObjectName("timelineControls")
+        self.timeline_controls.setAttribute(Qt.WA_StyledBackground, True)
+        self.timeline_controls.setStyleSheet(
+            "#timelineControls { background: rgba(20, 20, 24, 210); border: 1px solid #2d2d33; "
+            "border-radius: 6px; }"
+        )
+
+        layout = QHBoxLayout(self.timeline_controls)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+
+        self.prev_month_btn = QToolButton()
+        self.prev_month_btn.setText("⏮")
+        self.prev_month_btn.setToolTip("Jump to first day of previous month")
+        self.prev_month_btn.clicked.connect(self._jump_prev_month)
+
+        self.prev_day_btn = QToolButton()
+        self.prev_day_btn.setText("◀")
+        self.prev_day_btn.setToolTip("Go back one day")
+        self.prev_day_btn.clicked.connect(lambda: self._shift_day(-1))
+
+        self.date_button = DateDisplayButton()
+        self.date_button.setToolTip("Click to jump to today. Double-click to pick a date.")
+        self.date_button.clickedSingle.connect(self._jump_today)
+        self.date_button.doubleClicked.connect(self._pick_date)
+        self.date_button.setMinimumWidth(160)
+        self.date_button.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+
+        self.next_day_btn = QToolButton()
+        self.next_day_btn.setText("▶")
+        self.next_day_btn.setToolTip("Go forward one day")
+        self.next_day_btn.clicked.connect(lambda: self._shift_day(1))
+
+        self.next_month_btn = QToolButton()
+        self.next_month_btn.setText("⏭")
+        self.next_month_btn.setToolTip("Jump to first day of next month")
+        self.next_month_btn.clicked.connect(self._jump_next_month)
+
+        self.zoom_out_btn = QToolButton()
+        self.zoom_out_btn.setText("−")
+        self.zoom_out_btn.setToolTip("Zoom out")
+        self.zoom_out_btn.clicked.connect(lambda: self._change_zoom(-1))
+
+        self.zoom_in_btn = QToolButton()
+        self.zoom_in_btn.setText("+")
+        self.zoom_in_btn.setToolTip("Zoom in")
+        self.zoom_in_btn.clicked.connect(lambda: self._change_zoom(1))
+
+        self.zoom_label = QLabel("")
+        self.zoom_label.setStyleSheet("QLabel { color: #d6d6de; }")
+
+        layout.addWidget(self.prev_month_btn)
+        layout.addWidget(self.prev_day_btn)
+        layout.addWidget(self.date_button)
+        layout.addWidget(self.next_day_btn)
+        layout.addWidget(self.next_month_btn)
+        layout.addSpacing(12)
+        layout.addWidget(self.zoom_out_btn)
+        layout.addWidget(self.zoom_in_btn)
+        layout.addWidget(self.zoom_label)
+
+        self._update_date_display()
+        self._update_zoom_display()
+        self.timeline_controls.adjustSize()
+        self.timeline_controls.raise_()
+        self.timeline.viewport().installEventFilter(self)
+        self._position_timeline_controls()
+
+    def eventFilter(self, obj, event):
+        if obj is self.timeline.viewport() and event.type() == QEvent.Resize:
+            self._apply_zoom()
+            self._position_timeline_controls()
+        return super().eventFilter(obj, event)
+
+    def _position_timeline_controls(self):
+        if not hasattr(self, "timeline_controls"):
+            return
+        self.timeline_controls.adjustSize()
+        vp = self.timeline.viewport().rect()
+        margin = 8
+        x = max(margin, vp.right() - self.timeline_controls.width() - margin)
+        y = max(margin, vp.bottom() - self.timeline_controls.height() - margin)
+        self.timeline_controls.move(x, y)
+
+    def _format_date_display(self, day: datetime.date) -> str:
+        return day.strftime("%a %d %b %Y")
+
+    def _update_date_display(self):
+        if hasattr(self, "date_button"):
+            self.date_button.setText(self._format_date_display(self.current_date))
+
+    def _set_current_date(self, day: datetime.date):
+        self.current_date = day
+        self._update_date_display()
+        self.recompute()
+
+    def _shift_day(self, delta: int):
+        self._set_current_date(self.current_date + datetime.timedelta(days=delta))
+
+    def _jump_prev_month(self):
+        first_of_current = self.current_date.replace(day=1)
+        prev_month_last = first_of_current - datetime.timedelta(days=1)
+        self._set_current_date(prev_month_last.replace(day=1))
+
+    def _jump_next_month(self):
+        year = self.current_date.year + (1 if self.current_date.month == 12 else 0)
+        month = 1 if self.current_date.month == 12 else self.current_date.month + 1
+        self._set_current_date(datetime.date(year, month, 1))
+
+    def _jump_today(self):
+        self._set_current_date(datetime.date.today())
+
+    def _pick_date(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select date")
+        layout = QVBoxLayout(dlg)
+        calendar = QCalendarWidget()
+        calendar.setSelectedDate(
+            QDate(self.current_date.year, self.current_date.month, self.current_date.day)
+        )
+        layout.addWidget(calendar)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        if dlg.exec() == QDialog.Accepted:
+            qdate = calendar.selectedDate()
+            self._set_current_date(datetime.date(qdate.year(), qdate.month(), qdate.day()))
+
+    def _change_zoom(self, delta: int):
+        self.zoom_index = clamp(self.zoom_index + delta, 0, len(self.zoom_levels) - 1)
+        self._apply_zoom()
+
+    def _apply_zoom(self):
+        if not hasattr(self, "zoom_levels"):
+            return
+        zoom_minutes = self.zoom_levels[self.zoom_index]
+        viewport_width = max(1, self.timeline.viewport().width())
+        pixels_per_minute = viewport_width / max(1, zoom_minutes)
+        range_minutes = max(MINUTES_PER_DAY, zoom_minutes)
+        self.timeline.set_time_range(0, range_minutes)
+        self.timeline.set_pixels_per_minute(pixels_per_minute)
+        self._update_zoom_display()
+
+    def _format_zoom_label(self, minutes: int) -> str:
+        week_minutes = 7 * 24 * 60
+        day_minutes = 24 * 60
+        if minutes % week_minutes == 0:
+            weeks = minutes // week_minutes
+            return f"{weeks} week" if weeks == 1 else f"{weeks} weeks"
+        if minutes % day_minutes == 0:
+            days = minutes // day_minutes
+            return f"{days} day" if days == 1 else f"{days} days"
+        if minutes % 60 == 0:
+            hours = minutes // 60
+            return f"{hours} hour" if hours == 1 else f"{hours} hours"
+        return f"{minutes} mins"
+
+    def _update_zoom_display(self):
+        if not hasattr(self, "zoom_label"):
+            return
+        zoom_minutes = self.zoom_levels[self.zoom_index]
+        self.zoom_label.setText(self._format_zoom_label(zoom_minutes))
+        self.zoom_out_btn.setEnabled(self.zoom_index > 0)
+        self.zoom_in_btn.setEnabled(self.zoom_index < len(self.zoom_levels) - 1)
 
     def _update_summary(self, sim: SimResult):
         cs = self.settings_model.currency_symbol
