@@ -2457,17 +2457,17 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _axis_mode(self) -> str:
         total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
-        if total_minutes >= 14 * MINUTES_PER_DAY:
+        if total_minutes > 14 * MINUTES_PER_DAY:
             return "days_only"
         if total_minutes > MINUTES_PER_DAY:
             return "multi_day"
         return "single_day"
 
     def _axis_tick_interval(self) -> int:
-        mode = self._axis_mode()
-        if mode == "days_only":
-            return MINUTES_PER_DAY
-        if mode == "multi_day":
+        total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
+        if total_minutes > 14 * MINUTES_PER_DAY:
+            return 24 * 60
+        if total_minutes > 2 * MINUTES_PER_DAY:
             return 12 * 60
         return 60
 
