@@ -2231,6 +2231,8 @@ class TimelineWidget(QAbstractScrollArea):
         self.axis_label_padding = 4
         self.axis_labels_rotated = False
         self.axis_label_rot_height = 0
+        self.axis_day_title_height = 0
+        self.axis_day_title_gap = 4
         self.pixels_per_minute = 1.0
         self.scroll_offset_px = 0
         self.timeline_start_min = 0
@@ -2335,19 +2337,29 @@ class TimelineWidget(QAbstractScrollArea):
             self.axis_labels_rotated = False
             self.axis_h = 32
             return
-        tick_spacing = max(1, int(self.pixels_per_minute * 60))
+        mode = self._axis_mode()
+        tick_interval = self._axis_tick_interval()
+        tick_spacing = max(1, int(self.pixels_per_minute * tick_interval))
         metrics = QFontMetrics(self.font)
-        label_width = metrics.horizontalAdvance("00:00")
-        label_height = metrics.height()
-        needs_rotation = label_width + self.axis_label_padding > tick_spacing
+        title_metrics = QFontMetrics(self.name_font)
+        show_day_titles = self._day_count() > 1
+        self.axis_day_title_height = title_metrics.height() if show_day_titles else 0
+        label_height = metrics.height() if mode != "days_only" else 0
+        label_width = metrics.horizontalAdvance("24") if mode != "days_only" else 0
+        needs_rotation = mode != "days_only" and label_width + self.axis_label_padding > tick_spacing
         if needs_rotation:
             angle = math.radians(45)
             rot_height = abs(label_width * math.sin(angle)) + abs(label_height * math.cos(angle))
             self.axis_label_rot_height = int(rot_height)
-            self.axis_h = max(32, int(rot_height) + self.axis_top_pad + self.axis_bottom_pad)
+            label_area = int(rot_height)
         else:
             self.axis_label_rot_height = label_height
-            self.axis_h = max(32, label_height + self.axis_top_pad + self.axis_bottom_pad)
+            label_area = label_height
+        title_gap = self.axis_day_title_gap if self.axis_day_title_height and label_area else 0
+        self.axis_h = max(
+            32,
+            self.axis_day_title_height + title_gap + label_area + self.axis_top_pad + self.axis_bottom_pad,
+        )
         self.axis_labels_rotated = needs_rotation
 
     def sizeHint(self):
@@ -2442,6 +2454,32 @@ class TimelineWidget(QAbstractScrollArea):
     def _on_scroll(self, value: int):
         self.scroll_offset_px = value
         self._refresh_viewport()
+
+    def _axis_mode(self) -> str:
+        total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
+        if total_minutes >= 14 * MINUTES_PER_DAY:
+            return "days_only"
+        if total_minutes > MINUTES_PER_DAY:
+            return "multi_day"
+        return "single_day"
+
+    def _axis_tick_interval(self) -> int:
+        mode = self._axis_mode()
+        if mode == "days_only":
+            return MINUTES_PER_DAY
+        if mode == "multi_day":
+            return 12 * 60
+        return 60
+
+    def _axis_tick_label(self, minute: int, mode: str) -> Optional[str]:
+        if mode == "days_only":
+            return None
+        if minute == self.timeline_end_min and minute % MINUTES_PER_DAY == 0 and mode == "multi_day":
+            return "24"
+        if minute >= self.timeline_end_min:
+            return None
+        hour = (minute // 60) % 24
+        return f"{hour:d}"
 
     def set_pixels_per_minute(self, pixels_per_minute: float):
         self.pixels_per_minute = max(0.1, pixels_per_minute)
@@ -2594,19 +2632,37 @@ class TimelineWidget(QAbstractScrollArea):
         label_bottom = axis_baseline - 2
         metrics = QFontMetrics(self.font)
         p.setPen(QColor(160, 160, 170))
-        # hour ticks
+        mode = self._axis_mode()
+        tick_interval = self._axis_tick_interval()
+        # day titles
+        if self._day_count() > 1:
+            title_y = axis_top + self.axis_top_pad
+            p.setFont(self.name_font)
+            for day_offset in range(self._day_count()):
+                day_start = day_offset * MINUTES_PER_DAY
+                day_end = min((day_offset + 1) * MINUTES_PER_DAY, self.timeline_end_min)
+                x0 = self._minute_to_x(day_start)
+                x1 = self._minute_to_x(day_end)
+                if x1 <= x0:
+                    continue
+                p.drawText(
+                    QRect(x0, title_y, x1 - x0, self.axis_day_title_height),
+                    Qt.AlignCenter | Qt.AlignVCenter,
+                    f"Day {day_offset + 1}",
+                )
+
+        # axis ticks
         visible_start = self._x_to_minute(tl.left())
         visible_end = self._x_to_minute(tl.right())
-        start_tick = (visible_start // 60) * 60
+        start_tick = (visible_start // tick_interval) * tick_interval
         if start_tick < visible_start:
-            start_tick += 60
-        end_tick = min(self.timeline_end_min, visible_end + 60)
-        for m in range(start_tick, end_tick + 1, 60):
+            start_tick += tick_interval
+        end_tick = min(self.timeline_end_min, visible_end + tick_interval)
+        for m in range(start_tick, end_tick + 1, tick_interval):
             x = self._minute_to_x(m)
             p.drawLine(x, tick_top, x, axis_baseline)
-            hour = (m // 60) % 24
-            if m < self.timeline_end_min:
-                label = f"{hour:02d}:00"
+            label = self._axis_tick_label(m, mode)
+            if label:
                 if self.axis_labels_rotated:
                     p.save()
                     p.translate(x + 2, label_bottom - self.axis_label_rot_height)
