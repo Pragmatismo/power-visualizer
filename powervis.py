@@ -402,6 +402,7 @@ class SettingsModel:
     show_standing_charge: bool = False
     show_amps: bool = False
     show_total_power: bool = True
+    simulation_length_key: str = "1_week"
 
     def clone(self) -> "SettingsModel":
         return SettingsModel(
@@ -429,6 +430,7 @@ class SettingsModel:
             show_standing_charge=self.show_standing_charge,
             show_amps=self.show_amps,
             show_total_power=self.show_total_power,
+            simulation_length_key=self.simulation_length_key,
         )
 
     def to_qsettings(self, qs: QSettings):
@@ -451,6 +453,7 @@ class SettingsModel:
         qs.setValue("show_standing_charge", self.show_standing_charge)
         qs.setValue("show_amps", self.show_amps)
         qs.setValue("show_total_power", self.show_total_power)
+        qs.setValue("simulation_length_key", self.simulation_length_key)
 
         qs.setValue("has_run_before", True)
 
@@ -484,6 +487,9 @@ class SettingsModel:
         )
         sm.show_total_power = (
             str(qs.value("show_total_power", sm.show_total_power)).lower() == "true"
+        )
+        sm.simulation_length_key = str(
+            qs.value("simulation_length_key", sm.simulation_length_key)
         )
         # enforce the constraints you chose
         sm.month_days = 30
@@ -899,16 +905,50 @@ def custom_period_to_days(period: CustomPeriod, settings: SettingsModel) -> floa
     return duration
 
 
+SIMULATION_LENGTH_PRESETS: List[Tuple[str, str, float]] = [
+    ("1_day", "1 day", 1.0),
+    ("1_week", "1 week", 7.0),
+    ("1_month", "1 month", 30.0),
+]
+
+
+def simulation_length_key_for_period(period: CustomPeriod) -> str:
+    duration = f"{period.duration:g}"
+    return f"custom:{slugify(period.name)}:{duration}:{period.unit}"
+
+
+def simulation_length_options(
+    settings: SettingsModel,
+    custom_periods: Iterable[CustomPeriod],
+) -> List[Tuple[str, str, int]]:
+    options: List[Tuple[str, str, int]] = []
+    for key, label, days in SIMULATION_LENGTH_PRESETS:
+        minutes = max(1, int(days * MINUTES_PER_DAY))
+        options.append((key, label, minutes))
+    for period in custom_periods:
+        days = custom_period_to_days(period, settings)
+        minutes = max(1, int(round(days * MINUTES_PER_DAY)))
+        label = f"{period.name} ({period.duration:g} {period.unit})"
+        options.append((simulation_length_key_for_period(period), label, minutes))
+    return options
+
+
 # =========================
 # Settings dialog
 # =========================
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None, settings_model: Optional[SettingsModel] = None):
+    def __init__(
+        self,
+        parent=None,
+        settings_model: Optional[SettingsModel] = None,
+        custom_periods: Optional[List[CustomPeriod]] = None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(True)
         self.model = settings_model or SettingsModel()
+        self.custom_periods = custom_periods or []
 
         layout = QVBoxLayout(self)
 
@@ -924,6 +964,27 @@ class SettingsDialog(QDialog):
         self.mains_voltage.setSingleStep(1.0)
         self.mains_voltage.setValue(self.model.mains_voltage)
         form.addRow("Mains voltage (V)", self.mains_voltage)
+
+        self.simulation_length = QComboBox()
+        self._simulation_options = simulation_length_options(
+            self.model, self.custom_periods
+        )
+        for key, label, _minutes in self._simulation_options:
+            self.simulation_length.addItem(label, key)
+        default_index = next(
+            (i for i, (key, _label, _minutes) in enumerate(self._simulation_options) if key == "1_week"),
+            0,
+        )
+        current_index = next(
+            (
+                i
+                for i, (key, _label, _minutes) in enumerate(self._simulation_options)
+                if key == self.model.simulation_length_key
+            ),
+            default_index,
+        )
+        self.simulation_length.setCurrentIndex(current_index)
+        form.addRow("Simulation length", self.simulation_length)
 
         # Tariff group
         tariff_group = QGroupBox("Electricity tariff")
@@ -1021,6 +1082,7 @@ class SettingsDialog(QDialog):
             free_kw_threshold=float(self.free_kw.value()),
         ).normalized()
         m.free_rule = fr
+        m.simulation_length_key = str(self.simulation_length.currentData())
         return m
 
 
@@ -2212,7 +2274,7 @@ class TimelineWidget(QAbstractScrollArea):
         self._update_axis_layout()
         self._update_scrollbar()
         self.updateGeometry()
-        self.update()
+        self._refresh_viewport()
 
     def _update_visible_devices(self):
         if not self.project:
@@ -2376,13 +2438,13 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _on_scroll(self, value: int):
         self.scroll_offset_px = value
-        self.update()
+        self._refresh_viewport()
 
     def set_pixels_per_minute(self, pixels_per_minute: float):
         self.pixels_per_minute = max(0.1, pixels_per_minute)
         self._update_axis_layout()
         self._update_scrollbar()
-        self.update()
+        self._refresh_viewport()
 
     def set_time_range(self, start_min: int, end_min: int):
         start = int(start_min)
@@ -2393,7 +2455,10 @@ class TimelineWidget(QAbstractScrollArea):
         self.timeline_end_min = end
         self._update_axis_layout()
         self._update_scrollbar()
-        self.update()
+        self._refresh_viewport()
+
+    def _refresh_viewport(self):
+        self.viewport().update()
 
     def paintEvent(self, event):
         p = QPainter(self.viewport())
@@ -2701,16 +2766,21 @@ class TimelineWidget(QAbstractScrollArea):
         base_y = rr.bottom() - 8
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(120, 200, 140, 200))
-        for minute in range(MINUTES_PER_DAY):
-            value = total_w[minute] if minute < len(total_w) else 0.0
-            ratio = (value / peak) if peak > 0 else 0.0
-            bar_h = int(ratio * graph_h)
-            if bar_h <= 0:
-                continue
-            x0 = self._minute_to_x(minute)
-            x1 = self._minute_to_x(minute + 1)
-            width = max(1, x1 - x0)
-            p.drawRect(QRect(x0, base_y - bar_h, width, bar_h))
+        for day_offset in range(self._day_count()):
+            day_start = day_offset * MINUTES_PER_DAY
+            for minute in range(MINUTES_PER_DAY):
+                timeline_minute = day_start + minute
+                if timeline_minute >= self.timeline_end_min:
+                    break
+                value = total_w[minute] if minute < len(total_w) else 0.0
+                ratio = (value / peak) if peak > 0 else 0.0
+                bar_h = int(ratio * graph_h)
+                if bar_h <= 0:
+                    continue
+                x0 = self._minute_to_x(timeline_minute)
+                x1 = self._minute_to_x(timeline_minute + 1)
+                width = max(1, x1 - x0)
+                p.drawRect(QRect(x0, base_y - bar_h, width, bar_h))
 
         p.setPen(QPen(QColor(55, 55, 62), 1))
         p.setBrush(Qt.NoBrush)
@@ -2801,7 +2871,7 @@ class TimelineWidget(QAbstractScrollArea):
             self.setCursor(Qt.OpenHandCursor)
         else:
             self.setCursor(Qt.ArrowCursor)
-        self.update()
+        self._refresh_viewport()
 
     def mousePressEvent(self, e):
         if not self.project:
@@ -3021,7 +3091,7 @@ class TimelineWidget(QAbstractScrollArea):
                     s = MINUTES_PER_DAY - dur
                 dev.events[hit.item_index] = Event(s, dur, ewh).normalized()
 
-        self.update()
+        self._refresh_viewport()
 
 
 # =========================
@@ -3264,7 +3334,7 @@ class MainWindow(QMainWindow):
     # ---------------------
 
     def open_settings(self, first_run: bool = False):
-        dlg = SettingsDialog(self, self.settings_model)
+        dlg = SettingsDialog(self, self.settings_model, self.project.custom_periods)
         if dlg.exec() == QDialog.Accepted:
             self.settings_model = dlg.get_model()
             self.settings_model.to_qsettings(self.qs)
@@ -3415,6 +3485,7 @@ class MainWindow(QMainWindow):
     def recompute(self):
         sim = simulate_day(self.project, self.settings_model, self.current_date)
         self.timeline.set_data(self.project, self.settings_model, sim, day=self.current_date)
+        self._apply_zoom()
         self._update_summary(sim)
 
     def _build_timeline_controls(self):
@@ -3552,13 +3623,26 @@ class MainWindow(QMainWindow):
         self.zoom_index = clamp(self.zoom_index + delta, 0, len(self.zoom_levels) - 1)
         self._apply_zoom()
 
+    def _simulation_length_minutes(self) -> int:
+        options = simulation_length_options(self.settings_model, self.project.custom_periods)
+        for key, _label, minutes in options:
+            if key == self.settings_model.simulation_length_key:
+                return minutes
+        for key, _label, minutes in options:
+            if key == "1_week":
+                self.settings_model.simulation_length_key = key
+                self.settings_model.to_qsettings(self.qs)
+                return minutes
+        return MINUTES_PER_DAY
+
     def _apply_zoom(self):
         if not hasattr(self, "zoom_levels"):
             return
         zoom_minutes = self.zoom_levels[self.zoom_index]
         viewport_width = max(1, self.timeline.viewport().width())
-        pixels_per_minute = viewport_width / max(1, zoom_minutes)
-        range_minutes = max(MINUTES_PER_DAY, zoom_minutes)
+        range_minutes = max(1, self._simulation_length_minutes())
+        visible_minutes = min(zoom_minutes, range_minutes)
+        pixels_per_minute = viewport_width / max(1, visible_minutes)
         self.timeline.set_time_range(0, range_minutes)
         self.timeline.set_pixels_per_minute(pixels_per_minute)
         self._update_zoom_display()
