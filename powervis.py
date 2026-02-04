@@ -570,6 +570,14 @@ class SimResult:
     minute_total_w: List[float]  # length 1440
 
 
+@dataclass
+class SimRangeResult:
+    days: List[datetime.date]
+    day_results: List[SimResult]
+    total_kwh: float
+    total_cost: float
+
+
 def tariff_rate_for_minute(
     settings: SettingsModel,
     minute: int,
@@ -726,8 +734,11 @@ def is_free_this_minute(settings: SettingsModel, minute: int, total_kw: float) -
     return False
 
 
-def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
-    step = 1  # forced by your decision
+def build_device_minute_power(
+    project: Project,
+    day: Optional[Union[datetime.date, int]] = None,
+) -> Tuple[List[List[float]], List[float]]:
+    _ = day
     minute_total_w = [0.0] * MINUTES_PER_DAY
     dev_w = [ [0.0] * MINUTES_PER_DAY for _ in project.devices ]
 
@@ -770,6 +781,19 @@ def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
     for m in range(MINUTES_PER_DAY):
         minute_total_w[m] = sum(dev_w[i][m] for i in range(len(project.devices)))
 
+    return dev_w, minute_total_w
+
+
+def simulate_single_day(
+    project: Project,
+    settings: SettingsModel,
+    day: Optional[Union[datetime.date, int]] = None,
+    device_profiles: Optional[Tuple[List[List[float]], List[float]]] = None,
+) -> SimResult:
+    if device_profiles is None:
+        dev_w, minute_total_w = build_device_minute_power(project, day)
+    else:
+        dev_w, minute_total_w = device_profiles
     per_device_kwh = [0.0] * len(project.devices)
     per_device_cost = [0.0] * len(project.devices)
     per_device_on_minutes = [0] * len(project.devices)
@@ -782,7 +806,7 @@ def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
         total_w = minute_total_w[m]
         total_kw = total_w / 1000.0
         kwh_this_min = total_kw * (1.0 / 60.0)  # 1 minute
-        base_rate = tariff_rate_for_minute(settings, m)
+        base_rate = tariff_rate_for_minute(settings, m, day)
 
         if is_free_this_minute(settings, m, total_kw):
             cost_this_min = 0.0
@@ -813,6 +837,51 @@ def simulate_day(project: Project, settings: SettingsModel) -> SimResult:
         per_device_on_minutes=per_device_on_minutes,
         minute_total_w=minute_total_w
     )
+
+
+def simulate_range(
+    project: Project,
+    settings: SettingsModel,
+    start_date: Optional[datetime.date],
+    end_date: Optional[datetime.date],
+) -> SimRangeResult:
+    if start_date is None or end_date is None:
+        today = datetime.date.today()
+        start_date = start_date or today
+        end_date = end_date or today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    days: List[datetime.date] = []
+    day_results: List[SimResult] = []
+    total_kwh = 0.0
+    total_cost = 0.0
+    day_count = (end_date - start_date).days + 1
+
+    for offset in range(day_count):
+        day = start_date + datetime.timedelta(days=offset)
+        day_result = simulate_single_day(project, settings, day)
+        days.append(day)
+        day_results.append(day_result)
+        total_kwh += day_result.total_kwh_day
+        total_cost += day_result.total_cost_day
+
+    return SimRangeResult(
+        days=days,
+        day_results=day_results,
+        total_kwh=total_kwh,
+        total_cost=total_cost,
+    )
+
+
+def simulate_day(
+    project: Project,
+    settings: SettingsModel,
+    day: Optional[datetime.date] = None,
+) -> SimResult:
+    if day is None:
+        day = datetime.date.today()
+    return simulate_range(project, settings, day, day).day_results[0]
 
 
 def custom_period_to_days(period: CustomPeriod, settings: SettingsModel) -> float:
