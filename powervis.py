@@ -2371,6 +2371,9 @@ class TimelineWidget(QAbstractScrollArea):
                      vp.width() - self.left_label_w - self.right_info_w - 12,
                      vp.height() - self.top_tariff_h - self.axis_h - 12)
 
+    def timeline_draw_width(self) -> int:
+        return self._timeline_rect().width()
+
     def _minute_to_x(self, minute: int) -> int:
         tl = self._timeline_rect()
         offset = self._scroll_offset()
@@ -3639,10 +3642,10 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "zoom_levels"):
             return
         zoom_minutes = self.zoom_levels[self.zoom_index]
-        viewport_width = max(1, self.timeline.viewport().width())
+        timeline_draw_width = max(1, self.timeline.timeline_draw_width())
         range_minutes = max(1, self._simulation_length_minutes())
         visible_minutes = min(zoom_minutes, range_minutes)
-        pixels_per_minute = viewport_width / max(1, visible_minutes)
+        pixels_per_minute = timeline_draw_width / max(1, visible_minutes)
         self.timeline.set_time_range(0, range_minutes)
         self.timeline.set_pixels_per_minute(pixels_per_minute)
         self._update_zoom_display()
