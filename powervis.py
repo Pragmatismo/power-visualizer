@@ -2441,6 +2441,12 @@ class TimelineWidget(QAbstractScrollArea):
         total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
         return max(1, math.ceil(total_minutes / MINUTES_PER_DAY))
 
+    def _visible_minutes(self) -> int:
+        total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
+        draw_width = max(1, self.timeline_draw_width())
+        visible_minutes = draw_width / max(self.pixels_per_minute, 0.01)
+        return max(1, min(total_minutes, int(math.ceil(visible_minutes))))
+
     def _update_scrollbar(self):
         tl = self._timeline_rect()
         visible_width = max(1, tl.width())
@@ -2456,18 +2462,18 @@ class TimelineWidget(QAbstractScrollArea):
         self._refresh_viewport()
 
     def _axis_mode(self) -> str:
-        total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
-        if total_minutes > 14 * MINUTES_PER_DAY:
+        visible_minutes = self._visible_minutes()
+        if visible_minutes > 14 * MINUTES_PER_DAY:
             return "days_only"
-        if total_minutes > MINUTES_PER_DAY:
+        if visible_minutes > MINUTES_PER_DAY:
             return "multi_day"
         return "single_day"
 
     def _axis_tick_interval(self) -> int:
-        total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
-        if total_minutes > 14 * MINUTES_PER_DAY:
+        visible_minutes = self._visible_minutes()
+        if visible_minutes > 14 * MINUTES_PER_DAY:
             return 24 * 60
-        if total_minutes > 2 * MINUTES_PER_DAY:
+        if visible_minutes > 2 * MINUTES_PER_DAY:
             return 12 * 60
         return 60
 
