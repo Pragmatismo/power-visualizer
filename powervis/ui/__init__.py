@@ -66,6 +66,7 @@ CITY_LOCATIONS: List[Tuple[str, Optional[float], Optional[float]]] = [
     ("Custom", None, None),
     ("London, UK", 51.5074, -0.1278),
     ("New York, USA", 40.7128, -74.0060),
+    ("Baltimore, USA", 39.2904, -76.6122),
     ("Los Angeles, USA", 34.0522, -118.2437),
     ("Toronto, Canada", 43.6532, -79.3832),
     ("Sydney, Australia", -33.8688, 151.2093),
