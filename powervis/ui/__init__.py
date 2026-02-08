@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 
+from astral import Observer
+from astral.sun import sun
 from PySide6.QtCore import (
     Qt, QRect, QRectF, QPoint, QPointF, QSize, QSettings, QTimer, QEvent, Signal, QDate
 )
@@ -1424,6 +1426,7 @@ class TimelineWidget(QAbstractScrollArea):
         # layout constants
         self.left_label_w = 220
         self.top_tariff_h = 56
+        self.day_night_gap = 4
         self.row_h = 44
         self.row_gap = 6
         self.axis_h = 32
@@ -1457,6 +1460,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.tariff_company_font.setWeight(QFont.Bold)
         self.tariff_label_font = QFont(self.name_font)
         self.tariff_label_font.setWeight(QFont.Normal)
+        self.day_night_font = QFont("Sans", 10)
         self.power_font = QFont("Sans", 9)
         self.info_font = QFont("Sans", 11)
         self.setMinimumHeight(400)
@@ -1580,7 +1584,7 @@ class TimelineWidget(QAbstractScrollArea):
         total_row_h = self._total_row_height()
         total_row_gap = self.row_gap if total_row_h > 0 else 0
         h = (
-            self.top_tariff_h
+            self._axis_top()
             + self.axis_h
             + (len(self.row_items) * (self.row_h + self.row_gap))
             + total_row_h
@@ -1589,13 +1593,28 @@ class TimelineWidget(QAbstractScrollArea):
         )
         return QSize(1100, max(500, h))
 
+    def _day_night_bar_height(self) -> int:
+        if not (self.settings and self.settings.show_day_night):
+            return 0
+        metrics = QFontMetrics(self.day_night_font)
+        return metrics.height() + 6
+
+    def _day_night_block_height(self) -> int:
+        bar_height = self._day_night_bar_height()
+        if bar_height <= 0:
+            return 0
+        return bar_height + self.day_night_gap * 2
+
+    def _axis_top(self) -> int:
+        return self.top_tariff_h + self._day_night_block_height()
+
     def _timeline_rect(self) -> QRect:
         vp = self.viewport().rect()
         return QRect(
             self.left_label_w,
-            self.top_tariff_h + self.axis_h,
+            self._axis_top() + self.axis_h,
             vp.width() - self.left_label_w,
-            vp.height() - self.top_tariff_h - self.axis_h - 12,
+            vp.height() - self._axis_top() - self.axis_h - 12,
         )
 
     def timeline_draw_width(self) -> int:
@@ -1642,6 +1661,18 @@ class TimelineWidget(QAbstractScrollArea):
             self.top_tariff_h - 8,
         )
 
+    def _day_night_rect(self) -> QRect:
+        vp = self.viewport().rect()
+        bar_height = self._day_night_bar_height()
+        if bar_height <= 0:
+            return QRect()
+        return QRect(
+            self.left_label_w,
+            self.top_tariff_h + self.day_night_gap,
+            vp.width() - self.left_label_w,
+            bar_height,
+        )
+
     def _scroll_offset(self) -> int:
         return self.horizontalScrollBar().value()
 
@@ -1657,6 +1688,36 @@ class TimelineWidget(QAbstractScrollArea):
             return None
         day = self.reference_date + datetime.timedelta(days=day_offset)
         return day.isoformat()
+
+    def _sunrise_sunset_minutes(self, day: datetime.date) -> Optional[Tuple[int, int]]:
+        if not self.settings:
+            return None
+        observer = Observer(
+            latitude=self.settings.location_lat,
+            longitude=self.settings.location_lon,
+            elevation=0.0,
+        )
+        tzinfo = datetime.datetime.now().astimezone().tzinfo
+        try:
+            times = sun(observer, date=day, tzinfo=tzinfo)
+        except Exception as exc:
+            message = str(exc).lower()
+            if "always above" in message:
+                return 0, MINUTES_PER_DAY
+            if "always below" in message:
+                return 0, 0
+            return None
+        sunrise = times.get("sunrise")
+        sunset = times.get("sunset")
+        if not (sunrise and sunset):
+            return None
+        sunrise_min = int(round(sunrise.hour * 60 + sunrise.minute + sunrise.second / 60))
+        sunset_min = int(round(sunset.hour * 60 + sunset.minute + sunset.second / 60))
+        sunrise_min = clamp(sunrise_min, 0, MINUTES_PER_DAY)
+        sunset_min = clamp(sunset_min, 0, MINUTES_PER_DAY)
+        if sunset_min < sunrise_min:
+            sunrise_min, sunset_min = sunset_min, sunrise_min
+        return sunrise_min, sunset_min
 
     def _intervals_for_day(self, dev: Device, day_offset: int) -> List[Interval]:
         key = self._day_key(day_offset)
@@ -1815,6 +1876,9 @@ class TimelineWidget(QAbstractScrollArea):
         # Draw tariff bar
         self._paint_tariff(p)
 
+        # Draw day/night bar
+        self._paint_day_night(p)
+
         # Draw time axis
         self._paint_axis(p)
 
@@ -1939,9 +2003,83 @@ class TimelineWidget(QAbstractScrollArea):
             p.setFont(self.tariff_label_font)
             p.drawText(tariff_rect, Qt.AlignRight | Qt.AlignVCenter, tariff_name)
 
+    def _paint_day_night(self, p: QPainter):
+        bar_rect = self._day_night_rect()
+        if bar_rect.width() <= 0 or bar_rect.height() <= 0:
+            return
+        if not self.settings:
+            return
+        day_color = QColor(230, 200, 85)
+        night_color = QColor(20, 32, 70)
+        day_text_color = QColor(40, 35, 20)
+        night_text_color = QColor(225, 230, 245)
+        base_date = self.reference_date or datetime.date.today()
+        metrics = QFontMetrics(self.day_night_font)
+        p.setFont(self.day_night_font)
+        p.setPen(Qt.NoPen)
+        day_count = self._day_count()
+        for day_offset in range(day_count):
+            day_start = day_offset * MINUTES_PER_DAY
+            day_end = min((day_offset + 1) * MINUTES_PER_DAY, self.timeline_end_min)
+            x0 = self._minute_to_x(day_start)
+            x1 = self._minute_to_x(day_end)
+            if x1 <= x0:
+                continue
+            p.setBrush(night_color)
+            p.drawRect(QRectF(x0, bar_rect.top(), x1 - x0, bar_rect.height()))
+            sunrise_sunset = self._sunrise_sunset_minutes(base_date + datetime.timedelta(days=day_offset))
+            if sunrise_sunset is None:
+                sunrise_min = 6 * 60
+                sunset_min = 18 * 60
+            else:
+                sunrise_min, sunset_min = sunrise_sunset
+            day_start_min = day_start + sunrise_min
+            day_end_min = day_start + sunset_min
+            day_x0 = self._minute_to_x(day_start_min)
+            day_x1 = self._minute_to_x(day_end_min)
+            if day_x1 > day_x0:
+                p.setBrush(day_color)
+                p.drawRect(QRectF(day_x0, bar_rect.top(), day_x1 - day_x0, bar_rect.height()))
+
+            day_length = max(0, sunset_min - sunrise_min)
+            night_length = max(0, MINUTES_PER_DAY - day_length)
+            day_label = format_duration_hhmm(day_length)
+            night_label = format_duration_hhmm(night_length)
+
+            day_label_width = metrics.horizontalAdvance(day_label)
+            if day_x1 - day_x0 >= day_label_width + 6:
+                p.setPen(day_text_color)
+                p.drawText(
+                    QRectF(day_x0, bar_rect.top(), day_x1 - day_x0, bar_rect.height()),
+                    Qt.AlignCenter | Qt.AlignVCenter,
+                    day_label,
+                )
+
+            night1 = sunrise_min
+            night2 = MINUTES_PER_DAY - sunset_min
+            night_label_start = day_start
+            night_label_end = day_start + sunrise_min
+            if night2 > night1:
+                night_label_start = day_start + sunset_min
+                night_label_end = day_start + MINUTES_PER_DAY
+            night_x0 = self._minute_to_x(night_label_start)
+            night_x1 = self._minute_to_x(night_label_end)
+            night_label_width = metrics.horizontalAdvance(night_label)
+            if night_x1 - night_x0 >= night_label_width + 6:
+                p.setPen(night_text_color)
+                p.drawText(
+                    QRectF(night_x0, bar_rect.top(), night_x1 - night_x0, bar_rect.height()),
+                    Qt.AlignCenter | Qt.AlignVCenter,
+                    night_label,
+                )
+
+        p.setPen(QPen(QColor(90, 90, 100), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(bar_rect)
+
     def _paint_axis(self, p: QPainter):
         tl = self._timeline_rect()
-        axis_top = self.top_tariff_h
+        axis_top = self._axis_top()
         axis_baseline = axis_top + self.axis_h - self.axis_bottom_pad + 2
         tick_top = axis_baseline - 10
         label_bottom = axis_baseline - 2
@@ -2552,7 +2690,7 @@ class TimelineTotalsPanel(QWidget):
         self.setFixedWidth(max(0, info_inner_width + 12))
 
     def _panel_rect(self) -> QRect:
-        content_top = self.timeline.top_tariff_h + self.timeline.axis_h
+        content_top = self.timeline._axis_top() + self.timeline.axis_h
         return QRect(0, content_top, self.width(), self.height() - content_top - 12)
 
     def _row_rect(self, idx: int) -> QRect:
@@ -2982,6 +3120,11 @@ class MainWindow(QMainWindow):
         act_timeline_totals.setChecked(self.settings_model.show_timeline_totals)
         viewm.addAction(act_timeline_totals)
 
+        act_day_night = QAction("Day - Night", self)
+        act_day_night.setCheckable(True)
+        act_day_night.setChecked(self.settings_model.show_day_night)
+        viewm.addAction(act_day_night)
+
         viewm.addSeparator()
         act_sort_by_category = QAction("Sort by Category", self)
         act_sort_by_category.setCheckable(True)
@@ -2996,6 +3139,7 @@ class MainWindow(QMainWindow):
         act_show_total_power.toggled.connect(self._toggle_total_power)
         act_show_amps.toggled.connect(self._toggle_show_amps)
         act_timeline_totals.toggled.connect(self._toggle_timeline_totals)
+        act_day_night.toggled.connect(self._toggle_day_night)
         act_sort_by_category.toggled.connect(self._toggle_sort_by_category)
         act_show_standing.toggled.connect(self._toggle_standing_charge)
 
@@ -3516,6 +3660,12 @@ class MainWindow(QMainWindow):
         self.settings_model.to_qsettings(self.qs)
         self.timeline_totals.sync_from_timeline()
         self.recompute()
+
+    def _toggle_day_night(self, enabled: bool):
+        self.settings_model.show_day_night = enabled
+        self.settings_model.to_qsettings(self.qs)
+        self.timeline.updateGeometry()
+        self.timeline._refresh_viewport()
 
     def _toggle_affect_every_day(self, enabled: bool):
         self.settings_model.affect_every_day = enabled
