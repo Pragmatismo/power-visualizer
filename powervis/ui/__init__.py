@@ -39,7 +39,7 @@ from powervis.models import (
 )
 from powervis.simulate import (
     SimResult,
-    SimRangeResult,
+    SimTotals,
     tariff_rate_for_minute,
     tariff_segments,
     build_tariff_minute_rates,
@@ -49,8 +49,11 @@ from powervis.simulate import (
     simulate_single_day,
     simulate_range,
     simulate_day,
+    simulate_period,
     custom_period_to_days,
+    simulation_length_key_for_period,
     simulation_length_options,
+    simulation_length_minutes,
 )
 from powervis.utils import (
     MINUTES_PER_DAY,
@@ -82,6 +85,35 @@ CITY_LOCATIONS: List[Tuple[str, Optional[float], Optional[float]]] = [
     ("São Paulo, Brazil", -23.5505, -46.6333),
     ("Cape Town, South Africa", -33.9249, 18.4241),
 ]
+
+
+def scale_sim_totals(totals: SimTotals, factor: float) -> SimTotals:
+    if factor == 1.0:
+        return totals
+    return SimTotals(
+        total_kwh=totals.total_kwh * factor,
+        total_cost=totals.total_cost * factor,
+        per_device_kwh=[value * factor for value in totals.per_device_kwh],
+        per_device_cost=[value * factor for value in totals.per_device_cost],
+        per_device_on_minutes=[value * factor for value in totals.per_device_on_minutes],
+    )
+
+
+def estimate_period_totals(
+    project: Project,
+    settings: SettingsModel,
+    custom_periods: List[CustomPeriod],
+    start_date: Optional[datetime.date],
+    period_minutes: int,
+) -> SimTotals:
+    simulation_minutes = simulation_length_minutes(settings, custom_periods)
+    simulation_minutes = max(1, simulation_minutes)
+    period_minutes = max(1, int(period_minutes))
+    base_minutes = min(period_minutes, simulation_minutes)
+    totals = simulate_period(project, settings, start_date, base_minutes)
+    if period_minutes > simulation_minutes:
+        totals = scale_sim_totals(totals, period_minutes / simulation_minutes)
+    return totals
 
 
 class SettingsDialog(QDialog):
@@ -2647,6 +2679,11 @@ class TimelineTotalsPanel(QWidget):
         self.timeline = timeline
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.setMinimumWidth(0)
+        self.period_selector = QComboBox(self)
+        self.period_selector.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.period_selector.currentIndexChanged.connect(self._on_period_changed)
+        self._period_totals: Optional[SimTotals] = None
+        self._period_minutes = MINUTES_PER_DAY
 
     def _info_panel_visible(self) -> bool:
         return bool(self.timeline.settings and self.timeline.settings.show_timeline_totals)
@@ -2655,28 +2692,50 @@ class TimelineTotalsPanel(QWidget):
         if not self._info_panel_visible():
             self.setVisible(False)
             self.setFixedWidth(0)
+            self.period_selector.setVisible(False)
             return
         self.setVisible(True)
+        self.period_selector.setVisible(True)
+        self._refresh_period_options()
+        self._recompute_period_totals()
         self._update_panel_width()
+        self._position_period_selector()
         self.updateGeometry()
         self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_period_selector()
 
     def _update_panel_width(self):
         if not (self.timeline.project and self.timeline.settings and self.timeline.sim):
             self.setFixedWidth(0)
             return
         metrics = QFontMetrics(self.timeline.info_font)
+        selector_metrics = QFontMetrics(self.period_selector.font())
         max_kwh = 0.0
         max_cost = 0.0
+        if self._period_totals:
+            for idx in self.timeline.visible_device_indices:
+                max_kwh = max(max_kwh, self._period_totals.per_device_kwh[idx])
+                max_cost = max(max_cost, self._period_totals.per_device_cost[idx])
         for idx in self.timeline.visible_device_indices:
-            max_kwh = max(max_kwh, self.timeline.sim.per_device_kwh_day[idx])
-            max_cost = max(max_cost, self.timeline.sim.per_device_cost_day[idx])
+            if not self._period_totals:
+                max_kwh = max(max_kwh, self.timeline.sim.per_device_kwh_day[idx])
+                max_cost = max(max_cost, self.timeline.sim.per_device_cost_day[idx])
         kwh_text = f"▲ {max_kwh:.2f} kWh"
         cost_text = f"▼ {self.timeline.settings.currency_symbol}{max_cost:.2f}"
         text_width = max(
             metrics.horizontalAdvance(kwh_text),
             metrics.horizontalAdvance(cost_text),
         )
+        selector_text_width = 0
+        for i in range(self.period_selector.count()):
+            selector_text_width = max(
+                selector_text_width,
+                selector_metrics.horizontalAdvance(self.period_selector.itemText(i)),
+            )
+        selector_width = selector_text_width + 46
         if self.timeline.settings.show_total_power:
             peak_value = max(self.timeline.sim.minute_total_w) if self.timeline.sim.minute_total_w else 0.0
             peak_text = f"Peak: {peak_value:.0f} W"
@@ -2687,10 +2746,86 @@ class TimelineTotalsPanel(QWidget):
                 text_width = max(text_width, metrics.horizontalAdvance(amp_text))
         diameter = max(6, self.timeline.row_h - 16)
         info_inner_width = 4 + diameter + 10 + text_width + 4
-        self.setFixedWidth(max(0, info_inner_width + 12))
+        self.setFixedWidth(max(0, max(info_inner_width, selector_width) + 12))
+
+    def _selector_height(self) -> int:
+        return max(0, self.period_selector.sizeHint().height())
+
+    def _header_height(self) -> int:
+        if not self._info_panel_visible():
+            return 0
+        return self._selector_height() + 12
+
+    def _position_period_selector(self) -> None:
+        if not self._info_panel_visible():
+            return
+        content_top = self.timeline._axis_top() + self.timeline.axis_h
+        selector_height = self._selector_height()
+        if selector_height <= 0:
+            return
+        self.period_selector.setGeometry(
+            6,
+            content_top + 6,
+            max(0, self.width() - 12),
+            selector_height,
+        )
+
+    def _refresh_period_options(self) -> None:
+        if not (self.timeline.project and self.timeline.settings):
+            return
+        current_data = self.period_selector.currentData()
+        current_key = current_data.get("key") if isinstance(current_data, dict) else current_data
+        day_minutes = MINUTES_PER_DAY
+        options: List[Tuple[str, str, int]] = [
+            ("daily", "Daily", day_minutes),
+            ("weekly", "Weekly", 7 * day_minutes),
+            ("monthly", "Monthly", self.timeline.settings.month_days * day_minutes),
+            ("yearly", "Yearly", 365 * day_minutes),
+        ]
+        for period in self.timeline.project.custom_periods:
+            days = custom_period_to_days(period, self.timeline.settings)
+            minutes = max(1, int(round(days * day_minutes)))
+            label = f"{period.name} ({period.duration:g} {period.unit})"
+            options.append((simulation_length_key_for_period(period), label, minutes))
+        self.period_selector.blockSignals(True)
+        self.period_selector.clear()
+        selected_index = 0
+        for idx, (key, label, minutes) in enumerate(options):
+            self.period_selector.addItem(label, {"key": key, "minutes": minutes})
+            if current_key == key:
+                selected_index = idx
+        self.period_selector.setCurrentIndex(selected_index)
+        self.period_selector.blockSignals(False)
+
+    def _current_period_minutes(self) -> int:
+        data = self.period_selector.currentData()
+        if isinstance(data, dict):
+            return int(data.get("minutes") or MINUTES_PER_DAY)
+        if isinstance(data, int):
+            return data
+        return MINUTES_PER_DAY
+
+    def _recompute_period_totals(self) -> None:
+        if not (self.timeline.project and self.timeline.settings):
+            self._period_totals = None
+            return
+        self._period_minutes = self._current_period_minutes()
+        self._period_totals = estimate_period_totals(
+            self.timeline.project,
+            self.timeline.settings,
+            self.timeline.project.custom_periods,
+            self.timeline.reference_date,
+            self._period_minutes,
+        )
+
+    def _on_period_changed(self) -> None:
+        self._recompute_period_totals()
+        self._update_panel_width()
+        self._position_period_selector()
+        self.update()
 
     def _panel_rect(self) -> QRect:
-        content_top = self.timeline._axis_top() + self.timeline.axis_h
+        content_top = self.timeline._axis_top() + self.timeline.axis_h + self._header_height()
         return QRect(0, content_top, self.width(), self.height() - content_top - 12)
 
     def _row_rect(self, idx: int) -> QRect:
@@ -2719,6 +2854,11 @@ class TimelineTotalsPanel(QWidget):
         if panel_rect.width() <= 0 or panel_rect.height() <= 0:
             return
 
+        if self._period_totals is None:
+            self._recompute_period_totals()
+        period_totals = self._period_totals
+        period_minutes = max(1, int(self._period_minutes))
+
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(26, 26, 30))
         p.drawRect(panel_rect)
@@ -2734,9 +2874,14 @@ class TimelineTotalsPanel(QWidget):
                 continue
             dev_index = int(item["device_index"])
             info = QRect(rr.left() + 6, rr.top(), rr.width() - 12, rr.height())
-            on_min = self.timeline.sim.per_device_on_minutes[dev_index]
-            kwh = self.timeline.sim.per_device_kwh_day[dev_index]
-            cost = self.timeline.sim.per_device_cost_day[dev_index]
+            if period_totals:
+                on_min = period_totals.per_device_on_minutes[dev_index]
+                kwh = period_totals.per_device_kwh[dev_index]
+                cost = period_totals.per_device_cost[dev_index]
+            else:
+                on_min = self.timeline.sim.per_device_on_minutes[dev_index]
+                kwh = self.timeline.sim.per_device_kwh_day[dev_index]
+                cost = self.timeline.sim.per_device_cost_day[dev_index]
             bar_height = rr.height() - 16
             diameter = max(6, min(bar_height, info.height() - 8))
             circle_rect = QRect(
@@ -2745,7 +2890,7 @@ class TimelineTotalsPanel(QWidget):
                 diameter,
                 diameter,
             )
-            on_ratio = clamp(on_min / MINUTES_PER_DAY, 0.0, 1.0)
+            on_ratio = clamp(on_min / period_minutes, 0.0, 1.0)
             p.save()
             p.setRenderHint(QPainter.Antialiasing, True)
             p.setPen(Qt.NoPen)
@@ -3529,17 +3674,7 @@ class MainWindow(QMainWindow):
 
     def _update_summary(self, sim: SimResult):
         cs = self.settings_model.currency_symbol
-        day_kwh = sim.total_kwh_day
-        day_cost = sim.total_cost_day
-
-        week_kwh = day_kwh * 7
-        week_cost = day_cost * 7
-
-        month_kwh = day_kwh * 30
-        month_cost = day_cost * 30
-
-        year_kwh = day_kwh * 365
-        year_cost = day_cost * 365
+        day_minutes = MINUTES_PER_DAY
 
         show_standing = self.settings_model.show_standing_charge
         standing_charge = None
@@ -3552,13 +3687,42 @@ class MainWindow(QMainWindow):
 
         data_rows = []
 
-        def add_data_row(label: str, kwh: str, cost: str, days: float) -> None:
-            data_rows.append((label, kwh, cost, days))
+        def add_data_row(label: str, totals: SimTotals, days: float) -> None:
+            data_rows.append((label, totals, days))
 
-        add_data_row("Day", f"{day_kwh:.3f} kWh", f"{cs}{day_cost:.2f}", 1.0)
-        add_data_row("Week", f"{week_kwh:.3f} kWh", f"{cs}{week_cost:.2f}", 7.0)
-        add_data_row("Month", f"{month_kwh:.3f} kWh", f"{cs}{month_cost:.2f}", 30.0)
-        add_data_row("Year", f"{year_kwh:.3f} kWh", f"{cs}{year_cost:.2f}", 365.0)
+        daily_totals = estimate_period_totals(
+            self.project,
+            self.settings_model,
+            self.project.custom_periods,
+            self.current_date,
+            day_minutes,
+        )
+        weekly_totals = estimate_period_totals(
+            self.project,
+            self.settings_model,
+            self.project.custom_periods,
+            self.current_date,
+            7 * day_minutes,
+        )
+        monthly_totals = estimate_period_totals(
+            self.project,
+            self.settings_model,
+            self.project.custom_periods,
+            self.current_date,
+            self.settings_model.month_days * day_minutes,
+        )
+        yearly_totals = estimate_period_totals(
+            self.project,
+            self.settings_model,
+            self.project.custom_periods,
+            self.current_date,
+            365 * day_minutes,
+        )
+
+        add_data_row("Day", daily_totals, 1.0)
+        add_data_row("Week", weekly_totals, 7.0)
+        add_data_row("Month", monthly_totals, float(self.settings_model.month_days))
+        add_data_row("Year", yearly_totals, 365.0)
 
         enabled_periods = [cp for cp in self.project.custom_periods if cp.enabled]
         for period in enabled_periods:
@@ -3566,10 +3730,17 @@ class MainWindow(QMainWindow):
                 d = custom_period_to_days(period, self.settings_model)
             except Exception:
                 d = 1.0
+            minutes = max(1, int(round(d * day_minutes)))
+            period_totals = estimate_period_totals(
+                self.project,
+                self.settings_model,
+                self.project.custom_periods,
+                self.current_date,
+                minutes,
+            )
             add_data_row(
                 f"{period.name} ({period.duration:g} {period.unit})",
-                f"{day_kwh*d:.3f} kWh",
-                f"{cs}{day_cost*d:.2f}",
+                period_totals,
                 d,
             )
 
@@ -3594,17 +3765,19 @@ class MainWindow(QMainWindow):
             )
 
         no_standing_rowspan = len(data_rows) if data_rows else 1
-        for row_index, (label, kwh, cost, days) in enumerate(data_rows):
+        for row_index, (label, totals, days) in enumerate(data_rows):
             row_html = (
                 "<tr>"
                 f"<td style='padding-right: 18px; white-space: nowrap;'>{escape(label)}</td>"
-                f"<td style='padding-right: 18px; text-align: right; white-space: nowrap;'>{escape(kwh)}</td>"
-                f"<td style='text-align: right; white-space: nowrap; padding-right: 18px;'>{escape(cost)}</td>"
+                f"<td style='padding-right: 18px; text-align: right; white-space: nowrap;'>"
+                f"{totals.total_kwh:.3f} kWh</td>"
+                f"<td style='text-align: right; white-space: nowrap; padding-right: 18px;'>"
+                f"{cs}{totals.total_cost:.2f}</td>"
             )
             if show_standing:
                 if has_standing:
                     standing_cost = standing_charge * days
-                    total_cost = (day_cost * days) + standing_cost
+                    total_cost = totals.total_cost + standing_cost
                     row_html += (
                         f"<td style='text-align: right; white-space: nowrap; padding-right: 18px;'>"
                         f"{cs}{standing_cost:.2f}</td>"

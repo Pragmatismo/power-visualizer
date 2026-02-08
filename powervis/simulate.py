@@ -1,5 +1,6 @@
 import datetime
 import json
+import math
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Iterable, Union
 
@@ -105,6 +106,15 @@ class SimRangeResult:
     day_results: List[SimResult]
     total_kwh: float
     total_cost: float
+
+
+@dataclass
+class SimTotals:
+    total_kwh: float
+    total_cost: float
+    per_device_kwh: List[float]
+    per_device_cost: List[float]
+    per_device_on_minutes: List[float]
 
 
 def tariff_rate_for_minute(
@@ -411,6 +421,123 @@ def simulate_range(
     )
 
 
+def simulate_single_day_window(
+    project: Project,
+    settings: SettingsModel,
+    day: Optional[Union[datetime.date, int]],
+    start_min: int,
+    end_min: int,
+) -> SimTotals:
+    start_min = clamp(int(start_min), 0, MINUTES_PER_DAY)
+    end_min = clamp(int(end_min), 0, MINUTES_PER_DAY)
+    if end_min <= start_min:
+        device_count = len(project.devices)
+        return SimTotals(
+            total_kwh=0.0,
+            total_cost=0.0,
+            per_device_kwh=[0.0] * device_count,
+            per_device_cost=[0.0] * device_count,
+            per_device_on_minutes=[0.0] * device_count,
+        )
+
+    dev_w, minute_total_w = build_device_minute_power(project, day)
+    device_count = len(project.devices)
+    per_device_kwh = [0.0] * device_count
+    per_device_cost = [0.0] * device_count
+    per_device_on_minutes = [0.0] * device_count
+    total_kwh = 0.0
+    total_cost = 0.0
+
+    for m in range(start_min, end_min):
+        total_w = minute_total_w[m]
+        total_kw = total_w / 1000.0
+        kwh_this_min = total_kw * (1.0 / 60.0)
+        base_rate = tariff_rate_for_minute(settings, m, day)
+        if is_free_this_minute(settings, m, total_kw):
+            cost_this_min = 0.0
+        else:
+            cost_this_min = kwh_this_min * base_rate
+        total_kwh += kwh_this_min
+        total_cost += cost_this_min
+        if total_w > 0:
+            free = is_free_this_minute(settings, m, total_kw)
+            for i in range(device_count):
+                w_i = dev_w[i][m]
+                if w_i > 0:
+                    per_device_on_minutes[i] += 1
+                    kwh_i = (w_i / 1000.0) * (1.0 / 60.0)
+                    per_device_kwh[i] += kwh_i
+                    if not free:
+                        per_device_cost[i] += kwh_i * base_rate
+
+    return SimTotals(
+        total_kwh=total_kwh,
+        total_cost=total_cost,
+        per_device_kwh=per_device_kwh,
+        per_device_cost=per_device_cost,
+        per_device_on_minutes=per_device_on_minutes,
+    )
+
+
+def simulate_period(
+    project: Project,
+    settings: SettingsModel,
+    start_date: Optional[datetime.date],
+    total_minutes: int,
+) -> SimTotals:
+    if total_minutes <= 0:
+        device_count = len(project.devices)
+        return SimTotals(
+            total_kwh=0.0,
+            total_cost=0.0,
+            per_device_kwh=[0.0] * device_count,
+            per_device_cost=[0.0] * device_count,
+            per_device_on_minutes=[0.0] * device_count,
+        )
+    if start_date is None:
+        start_date = datetime.date.today()
+
+    total_minutes = int(total_minutes)
+    day_count = max(1, math.ceil(total_minutes / MINUTES_PER_DAY))
+    device_count = len(project.devices)
+    per_device_kwh = [0.0] * device_count
+    per_device_cost = [0.0] * device_count
+    per_device_on_minutes = [0.0] * device_count
+    total_kwh = 0.0
+    total_cost = 0.0
+
+    for offset in range(day_count):
+        minutes_remaining = total_minutes - offset * MINUTES_PER_DAY
+        if minutes_remaining <= 0:
+            break
+        day_minutes = min(MINUTES_PER_DAY, minutes_remaining)
+        day = start_date + datetime.timedelta(days=offset)
+        if day_minutes == MINUTES_PER_DAY:
+            day_result = simulate_single_day(project, settings, day)
+            total_kwh += day_result.total_kwh_day
+            total_cost += day_result.total_cost_day
+            for i in range(device_count):
+                per_device_kwh[i] += day_result.per_device_kwh_day[i]
+                per_device_cost[i] += day_result.per_device_cost_day[i]
+                per_device_on_minutes[i] += day_result.per_device_on_minutes[i]
+        else:
+            day_totals = simulate_single_day_window(project, settings, day, 0, day_minutes)
+            total_kwh += day_totals.total_kwh
+            total_cost += day_totals.total_cost
+            for i in range(device_count):
+                per_device_kwh[i] += day_totals.per_device_kwh[i]
+                per_device_cost[i] += day_totals.per_device_cost[i]
+                per_device_on_minutes[i] += day_totals.per_device_on_minutes[i]
+
+    return SimTotals(
+        total_kwh=total_kwh,
+        total_cost=total_cost,
+        per_device_kwh=per_device_kwh,
+        per_device_cost=per_device_cost,
+        per_device_on_minutes=per_device_on_minutes,
+    )
+
+
 def simulate_day(
     project: Project,
     settings: SettingsModel,
@@ -462,3 +589,17 @@ def simulation_length_options(
         label = f"{period.name} ({period.duration:g} {period.unit})"
         options.append((simulation_length_key_for_period(period), label, minutes))
     return options
+
+
+def simulation_length_minutes(
+    settings: SettingsModel,
+    custom_periods: Iterable[CustomPeriod],
+) -> int:
+    options = simulation_length_options(settings, custom_periods)
+    for key, _label, minutes in options:
+        if key == settings.simulation_length_key:
+            return minutes
+    for key, _label, minutes in options:
+        if key == "1_week":
+            return minutes
+    return MINUTES_PER_DAY
