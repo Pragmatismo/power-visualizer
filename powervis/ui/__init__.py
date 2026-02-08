@@ -1447,7 +1447,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
         self.project: Optional[Project] = None
         self.settings: Optional[SettingsModel] = None
@@ -1499,12 +1499,19 @@ class TimelineWidget(QAbstractScrollArea):
         self.info_font = QFont("Sans", 11)
         self.setMinimumHeight(400)
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+        self.verticalScrollBar().valueChanged.connect(self._on_vertical_scroll)
         self.info_panel: Optional["TimelineTotalsPanel"] = None
+        self.labels_panel: Optional["TimelineLabelsPanel"] = None
 
     def set_info_panel(self, panel: Optional["TimelineTotalsPanel"]):
         self.info_panel = panel
         if self.info_panel:
             self.info_panel.sync_from_timeline()
+
+    def set_labels_panel(self, panel: Optional["TimelineLabelsPanel"]):
+        self.labels_panel = panel
+        if self.labels_panel:
+            self.labels_panel.sync_from_timeline()
 
     def set_data(
         self,
@@ -1527,6 +1534,8 @@ class TimelineWidget(QAbstractScrollArea):
         self._refresh_viewport()
         if self.info_panel:
             self.info_panel.sync_from_timeline()
+        if self.labels_panel:
+            self.labels_panel.sync_from_timeline()
 
     def _update_visible_devices(self):
         if not self.project:
@@ -1568,6 +1577,8 @@ class TimelineWidget(QAbstractScrollArea):
         name_metrics = QFontMetrics(self.name_font)
         power_metrics = QFontMetrics(self.power_font)
         category_metrics = QFontMetrics(self.category_font)
+        company_metrics = QFontMetrics(self.tariff_company_font)
+        label_metrics = QFontMetrics(self.tariff_label_font)
         widest = 0
         for item in self.row_items:
             if item["type"] == "device":
@@ -1581,7 +1592,20 @@ class TimelineWidget(QAbstractScrollArea):
                 widest = max(widest, category_metrics.horizontalAdvance(str(item["label"])))
         if self.settings and self.settings.show_total_power:
             widest = max(widest, name_metrics.horizontalAdvance("Total Power"))
+        if self.settings:
+            label = self.settings.tariff_label or "Tariff"
+            if " — " in label:
+                company_name, tariff_name = label.split(" — ", 1)
+            elif " - " in label:
+                company_name, tariff_name = label.split(" - ", 1)
+            else:
+                company_name, tariff_name = label, ""
+            widest = max(widest, company_metrics.horizontalAdvance(company_name))
+            if tariff_name:
+                widest = max(widest, label_metrics.horizontalAdvance(tariff_name))
         self.left_label_w = max(160, widest + self.label_pad * 2)
+        if self.labels_panel:
+            self.labels_panel.sync_from_timeline()
 
     def _update_axis_layout(self):
         if not self.project:
@@ -1616,16 +1640,7 @@ class TimelineWidget(QAbstractScrollArea):
     def sizeHint(self):
         if not self.project:
             return QSize(900, 500)
-        total_row_h = self._total_row_height()
-        total_row_gap = self.row_gap if total_row_h > 0 else 0
-        h = (
-            self._axis_top()
-            + self.axis_h
-            + (len(self.row_items) * (self.row_h + self.row_gap))
-            + total_row_h
-            + total_row_gap
-            + 20
-        )
+        h = self._axis_top() + self.axis_h + self._row_stack_height() + 20
         return QSize(1100, max(500, h))
 
     def _day_night_bar_height(self) -> int:
@@ -1646,9 +1661,9 @@ class TimelineWidget(QAbstractScrollArea):
     def _timeline_rect(self) -> QRect:
         vp = self.viewport().rect()
         return QRect(
-            self.left_label_w,
+            0,
             self._axis_top() + self.axis_h,
-            vp.width() - self.left_label_w,
+            vp.width(),
             vp.height() - self._axis_top() - self.axis_h - 12,
         )
 
@@ -1670,7 +1685,7 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _row_rect(self, idx: int) -> QRect:
         tl = self._timeline_rect()
-        y0 = tl.top() + idx * (self.row_h + self.row_gap)
+        y0 = tl.top() + idx * (self.row_h + self.row_gap) - self._vertical_offset()
         return QRect(tl.left(), y0, tl.width(), self.row_h)
 
     def _total_row_height(self) -> int:
@@ -1680,19 +1695,15 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _total_row_rect(self) -> QRect:
         tl = self._timeline_rect()
-        y0 = tl.top() + len(self.row_items) * (self.row_h + self.row_gap)
+        y0 = tl.top() + len(self.row_items) * (self.row_h + self.row_gap) - self._vertical_offset()
         return QRect(tl.left(), y0, tl.width(), self._total_row_height())
-
-    def _device_label_rect(self, idx: int) -> QRect:
-        rr = self._row_rect(idx)
-        return QRect(self.label_pad, rr.top(), self.left_label_w - self.label_pad * 2, rr.height())
 
     def _tariff_rect(self) -> QRect:
         vp = self.viewport().rect()
         return QRect(
-            self.left_label_w,
+            0,
             6,
-            vp.width() - self.left_label_w,
+            vp.width(),
             self.top_tariff_h - 8,
         )
 
@@ -1702,17 +1713,25 @@ class TimelineWidget(QAbstractScrollArea):
         if bar_height <= 0:
             return QRect()
         return QRect(
-            self.left_label_w,
+            0,
             self.top_tariff_h + self.day_night_gap,
-            vp.width() - self.left_label_w,
+            vp.width(),
             bar_height,
         )
 
     def _scroll_offset(self) -> int:
         return self.horizontalScrollBar().value()
 
+    def _vertical_offset(self) -> int:
+        return self.verticalScrollBar().value()
+
     def _content_width(self) -> int:
         return max(1, int((self.timeline_end_min - self.timeline_start_min) * self.pixels_per_minute))
+
+    def _row_stack_height(self) -> int:
+        total_row_h = self._total_row_height()
+        total_row_gap = self.row_gap if total_row_h > 0 else 0
+        return (len(self.row_items) * (self.row_h + self.row_gap)) + total_row_h + total_row_gap
 
     def _day_count(self) -> int:
         total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
@@ -1840,9 +1859,19 @@ class TimelineWidget(QAbstractScrollArea):
         bar.setRange(0, max_offset)
         if bar.value() > max_offset:
             bar.setValue(max_offset)
+        visible_height = max(1, tl.height())
+        max_offset_y = max(0, self._row_stack_height() - visible_height)
+        vbar = self.verticalScrollBar()
+        vbar.setPageStep(visible_height)
+        vbar.setRange(0, max_offset_y)
+        if vbar.value() > max_offset_y:
+            vbar.setValue(max_offset_y)
 
     def _on_scroll(self, value: int):
         self.scroll_offset_px = value
+        self._refresh_viewport()
+
+    def _on_vertical_scroll(self, value: int):
         self._refresh_viewport()
 
     def _axis_mode(self) -> str:
@@ -1897,6 +1926,8 @@ class TimelineWidget(QAbstractScrollArea):
         self.viewport().update()
         if self.info_panel:
             self.info_panel.update()
+        if self.labels_panel:
+            self.labels_panel.update()
 
     def paintEvent(self, event):
         p = QPainter(self.viewport())
@@ -2008,36 +2039,6 @@ class TimelineWidget(QAbstractScrollArea):
         p.setPen(QPen(QColor(120, 120, 130), 1))
         p.setBrush(Qt.NoBrush)
         p.drawRect(tr)
-        p.setPen(QColor(230, 235, 245))
-        label_width = self.left_label_w - self.label_pad * 2
-        label_right = tr.left() - 4
-        label_rect = QRect(label_right - label_width, tr.top(), label_width, tr.height())
-        label = self.settings.tariff_label or "Tariff"
-        if " — " in label:
-            company_name, tariff_name = label.split(" — ", 1)
-        elif " - " in label:
-            company_name, tariff_name = label.split(" - ", 1)
-        else:
-            company_name, tariff_name = label, ""
-        company_metrics = QFontMetrics(self.tariff_company_font)
-        label_metrics = QFontMetrics(self.tariff_label_font)
-        line_gap = 2
-        total_h = company_metrics.height() + (label_metrics.height() if tariff_name else 0)
-        if tariff_name:
-            total_h += line_gap
-        start_y = label_rect.top() + (label_rect.height() - total_h) // 2
-        company_rect = QRect(label_rect.left(), start_y, label_rect.width(), company_metrics.height())
-        p.setFont(self.tariff_company_font)
-        p.drawText(company_rect, Qt.AlignRight | Qt.AlignVCenter, company_name)
-        if tariff_name:
-            tariff_rect = QRect(
-                label_rect.left(),
-                company_rect.bottom() + 1 + line_gap,
-                label_rect.width(),
-                label_metrics.height(),
-            )
-            p.setFont(self.tariff_label_font)
-            p.drawText(tariff_rect, Qt.AlignRight | Qt.AlignVCenter, tariff_name)
 
     def _paint_day_night(self, p: QPainter):
         bar_rect = self._day_night_rect()
@@ -2167,28 +2168,14 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _paint_row(self, p: QPainter, row_index: int, dev_index: int, dev: Device):
         rr = self._row_rect(row_index)
+        tl = self._timeline_rect()
+        if rr.bottom() < tl.top() or rr.top() > tl.bottom():
+            return
         # row background
         bg = QColor(34, 34, 38) if row_index % 2 == 0 else QColor(30, 30, 34)
         p.setPen(Qt.NoPen)
         p.setBrush(bg)
         p.drawRect(rr)
-
-        # label left
-        lr = self._device_label_rect(row_index)
-        name_metrics = QFontMetrics(self.name_font)
-        power_metrics = QFontMetrics(self.power_font)
-        name_h = name_metrics.height()
-        power_h = power_metrics.height()
-        total_h = name_h + power_h
-        start_y = lr.top() + (lr.height() - total_h) // 2
-        name_rect = QRect(lr.left(), start_y, lr.width(), name_h)
-        power_rect = QRect(lr.left(), start_y + name_h, lr.width(), power_h)
-
-        p.setPen(QColor(220, 220, 230))
-        p.setFont(self.name_font)
-        p.drawText(name_rect, Qt.AlignCenter, dev.name)
-        p.setFont(self.power_font)
-        p.drawText(power_rect, Qt.AlignCenter, f"{dev.power_w:g} W")
 
         # draw items on timeline
         p.setPen(Qt.NoPen)
@@ -2259,15 +2246,13 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _paint_category_row(self, p: QPainter, row_index: int, label: str):
         rr = self._row_rect(row_index)
+        tl = self._timeline_rect()
+        if rr.bottom() < tl.top() or rr.top() > tl.bottom():
+            return
         bg = QColor(22, 22, 26)
         p.setPen(Qt.NoPen)
         p.setBrush(bg)
         p.drawRect(rr)
-
-        lr = self._device_label_rect(row_index)
-        p.setPen(QColor(190, 190, 205))
-        p.setFont(self.category_font)
-        p.drawText(lr, Qt.AlignLeft | Qt.AlignVCenter, label)
 
         p.setPen(QPen(QColor(55, 55, 62), 1))
         p.setBrush(Qt.NoBrush)
@@ -2277,16 +2262,13 @@ class TimelineWidget(QAbstractScrollArea):
         if not (self.project and self.sim and self.settings and self.settings.show_total_power):
             return
         rr = self._total_row_rect()
+        tl = self._timeline_rect()
+        if rr.bottom() < tl.top() or rr.top() > tl.bottom():
+            return
         bg = QColor(28, 28, 32)
         p.setPen(Qt.NoPen)
         p.setBrush(bg)
         p.drawRect(rr)
-
-        # label left
-        lr = QRect(self.label_pad, rr.top(), self.left_label_w - self.label_pad * 2, rr.height())
-        p.setPen(QColor(220, 220, 230))
-        p.setFont(self.name_font)
-        p.drawText(lr, Qt.AlignCenter, "Total Power")
 
         # draw total power graph
         peak = 0.0
@@ -2700,6 +2682,166 @@ class TimelineWidget(QAbstractScrollArea):
         self._refresh_viewport()
 
 
+class TimelineLabelsPanel(QWidget):
+    def __init__(self, timeline: TimelineWidget, parent=None):
+        super().__init__(parent)
+        self.timeline = timeline
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setMinimumWidth(0)
+        self.setStyleSheet("border-right: 1px solid #2d2d33;")
+
+    def sync_from_timeline(self):
+        if not (self.timeline.project and self.timeline.settings and self.timeline.sim):
+            self.setFixedWidth(0)
+            return
+        self.setFixedWidth(self.timeline.left_label_w)
+        self.updateGeometry()
+        self.update()
+
+    def _panel_rect(self) -> QRect:
+        content_top = self.timeline._axis_top() + self.timeline.axis_h
+        return QRect(0, content_top, self.width(), self.height() - content_top - 12)
+
+    def _row_rect(self, idx: int) -> QRect:
+        panel_rect = self._panel_rect()
+        y0 = panel_rect.top() + idx * (self.timeline.row_h + self.timeline.row_gap)
+        y0 -= self.timeline._vertical_offset()
+        return QRect(panel_rect.left(), y0, panel_rect.width(), self.timeline.row_h)
+
+    def _total_row_rect(self) -> QRect:
+        panel_rect = self._panel_rect()
+        y0 = panel_rect.top() + len(self.timeline.row_items) * (
+            self.timeline.row_h + self.timeline.row_gap
+        )
+        y0 -= self.timeline._vertical_offset()
+        return QRect(panel_rect.left(), y0, panel_rect.width(), self.timeline._total_row_height())
+
+    def _tariff_label_rect(self) -> QRect:
+        tr = QRect(0, 6, self.width(), self.timeline.top_tariff_h - 8)
+        return QRect(
+            self.timeline.label_pad,
+            tr.top(),
+            max(0, tr.width() - self.timeline.label_pad * 2),
+            tr.height(),
+        )
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, False)
+        p.fillRect(self.rect(), QColor(25, 25, 28))
+
+        if not (self.timeline.project and self.timeline.settings and self.timeline.sim):
+            return
+
+        label_rect = self._tariff_label_rect()
+        label = self.timeline.settings.tariff_label or "Tariff"
+        if " — " in label:
+            company_name, tariff_name = label.split(" — ", 1)
+        elif " - " in label:
+            company_name, tariff_name = label.split(" - ", 1)
+        else:
+            company_name, tariff_name = label, ""
+        p.setPen(QColor(230, 235, 245))
+        company_metrics = QFontMetrics(self.timeline.tariff_company_font)
+        label_metrics = QFontMetrics(self.timeline.tariff_label_font)
+        line_gap = 2
+        total_h = company_metrics.height() + (label_metrics.height() if tariff_name else 0)
+        if tariff_name:
+            total_h += line_gap
+        start_y = label_rect.top() + (label_rect.height() - total_h) // 2
+        company_rect = QRect(label_rect.left(), start_y, label_rect.width(), company_metrics.height())
+        p.setFont(self.timeline.tariff_company_font)
+        p.drawText(company_rect, Qt.AlignRight | Qt.AlignVCenter, company_name)
+        if tariff_name:
+            tariff_rect = QRect(
+                label_rect.left(),
+                company_rect.bottom() + 1 + line_gap,
+                label_rect.width(),
+                label_metrics.height(),
+            )
+            p.setFont(self.timeline.tariff_label_font)
+            p.drawText(tariff_rect, Qt.AlignRight | Qt.AlignVCenter, tariff_name)
+
+        panel_rect = self._panel_rect()
+        if panel_rect.width() <= 0 or panel_rect.height() <= 0:
+            return
+
+        for row_index, item in enumerate(self.timeline.row_items):
+            rr = self._row_rect(row_index)
+            if rr.bottom() < panel_rect.top() or rr.top() > panel_rect.bottom():
+                continue
+            if item["type"] == "category":
+                bg = QColor(22, 22, 26)
+                p.setPen(Qt.NoPen)
+                p.setBrush(bg)
+                p.drawRect(rr)
+                text_rect = QRect(
+                    rr.left() + self.timeline.label_pad,
+                    rr.top(),
+                    max(0, rr.width() - self.timeline.label_pad * 2),
+                    rr.height(),
+                )
+                p.setPen(QColor(190, 190, 205))
+                p.setFont(self.timeline.category_font)
+                p.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, str(item["label"]))
+            else:
+                bg = QColor(34, 34, 38) if row_index % 2 == 0 else QColor(30, 30, 34)
+                p.setPen(Qt.NoPen)
+                p.setBrush(bg)
+                p.drawRect(rr)
+                dev = self.timeline.project.devices[int(item["device_index"])]
+                name_metrics = QFontMetrics(self.timeline.name_font)
+                power_metrics = QFontMetrics(self.timeline.power_font)
+                name_h = name_metrics.height()
+                power_h = power_metrics.height()
+                total_h = name_h + power_h
+                start_y = rr.top() + (rr.height() - total_h) // 2
+                name_rect = QRect(
+                    rr.left() + self.timeline.label_pad,
+                    start_y,
+                    max(0, rr.width() - self.timeline.label_pad * 2),
+                    name_h,
+                )
+                power_rect = QRect(
+                    rr.left() + self.timeline.label_pad,
+                    start_y + name_h,
+                    max(0, rr.width() - self.timeline.label_pad * 2),
+                    power_h,
+                )
+                p.setPen(QColor(220, 220, 230))
+                p.setFont(self.timeline.name_font)
+                p.drawText(name_rect, Qt.AlignRight | Qt.AlignVCenter, dev.name)
+                p.setFont(self.timeline.power_font)
+                p.drawText(power_rect, Qt.AlignRight | Qt.AlignVCenter, f"{dev.power_w:g} W")
+
+            p.setPen(QPen(QColor(55, 55, 62), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(rr)
+
+        if not self.timeline.settings.show_total_power:
+            return
+
+        rr = self._total_row_rect()
+        if rr.height() <= 0 or rr.bottom() < panel_rect.top() or rr.top() > panel_rect.bottom():
+            return
+        bg = QColor(28, 28, 32)
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRect(rr)
+        label_rect = QRect(
+            rr.left() + self.timeline.label_pad,
+            rr.top(),
+            max(0, rr.width() - self.timeline.label_pad * 2),
+            rr.height(),
+        )
+        p.setPen(QColor(220, 220, 230))
+        p.setFont(self.timeline.name_font)
+        p.drawText(label_rect, Qt.AlignRight | Qt.AlignVCenter, "Total Power")
+        p.setPen(QPen(QColor(55, 55, 62), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(rr)
+
+
 class TimelineTotalsPanel(QWidget):
     def __init__(self, timeline: TimelineWidget, parent=None):
         super().__init__(parent)
@@ -2859,6 +3001,7 @@ class TimelineTotalsPanel(QWidget):
     def _row_rect(self, idx: int) -> QRect:
         panel_rect = self._panel_rect()
         y0 = panel_rect.top() + idx * (self.timeline.row_h + self.timeline.row_gap)
+        y0 -= self.timeline._vertical_offset()
         return QRect(panel_rect.left(), y0, panel_rect.width(), self.timeline.row_h)
 
     def _total_row_rect(self) -> QRect:
@@ -2866,6 +3009,7 @@ class TimelineTotalsPanel(QWidget):
         y0 = panel_rect.top() + len(self.timeline.row_items) * (
             self.timeline.row_h + self.timeline.row_gap
         )
+        y0 -= self.timeline._vertical_offset()
         return QRect(panel_rect.left(), y0, panel_rect.width(), self.timeline._total_row_height())
 
     def paintEvent(self, event):
@@ -3196,12 +3340,15 @@ class MainWindow(QMainWindow):
         timeline_row = QWidget()
         timeline_layout = QHBoxLayout(timeline_row)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
-        timeline_layout.setSpacing(12)
+        timeline_layout.setSpacing(0)
 
         self.timeline = TimelineWidget(parent=self)
+        self.timeline_labels = TimelineLabelsPanel(self.timeline, parent=self)
         self.timeline_totals = TimelineTotalsPanel(self.timeline, parent=self)
         self.timeline.set_info_panel(self.timeline_totals)
+        self.timeline.set_labels_panel(self.timeline_labels)
 
+        timeline_layout.addWidget(self.timeline_labels, stretch=0)
         timeline_layout.addWidget(self.timeline, stretch=1)
         timeline_layout.addWidget(self.timeline_totals, stretch=0)
         root_layout.addWidget(timeline_row, stretch=1)
