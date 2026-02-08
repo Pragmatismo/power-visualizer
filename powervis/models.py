@@ -59,6 +59,8 @@ class Device:
 
     intervals: List[Interval] = field(default_factory=list)  # for scheduled
     events: List[Event] = field(default_factory=list)        # for per-use
+    day_intervals: Dict[str, List[Interval]] = field(default_factory=dict)
+    day_events: Dict[str, List[Event]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -71,6 +73,14 @@ class Device:
             "variable": self.variable,
             "intervals": [asdict(i) for i in self.intervals],
             "events": [asdict(e) for e in self.events],
+            "day_intervals": {
+                day: [asdict(i) for i in intervals]
+                for day, intervals in self.day_intervals.items()
+            },
+            "day_events": {
+                day: [asdict(e) for e in events]
+                for day, events in self.day_events.items()
+            },
         }
 
     def apply_usage_settings(self):
@@ -104,6 +114,14 @@ class Device:
                 dev.variable = True
         dev.intervals = [Interval(**i).normalized() for i in d.get("intervals", [])]
         dev.events = [Event(**e).normalized() for e in d.get("events", [])]
+        dev.day_intervals = {}
+        for day, intervals in d.get("day_intervals", {}).items():
+            if isinstance(intervals, list):
+                dev.day_intervals[str(day)] = [Interval(**i).normalized() for i in intervals]
+        dev.day_events = {}
+        for day, events in d.get("day_events", {}).items():
+            if isinstance(events, list):
+                dev.day_events[str(day)] = [Event(**e).normalized() for e in events]
         dev.apply_usage_settings()
         return dev
 
@@ -214,6 +232,7 @@ class SettingsModel:
     show_timeline_totals: bool = True
     sort_by_category: bool = False
     simulation_length_key: str = "1_week"
+    affect_every_day: bool = True
 
     def clone(self) -> "SettingsModel":
         return SettingsModel(
@@ -244,6 +263,7 @@ class SettingsModel:
             show_timeline_totals=self.show_timeline_totals,
             sort_by_category=self.sort_by_category,
             simulation_length_key=self.simulation_length_key,
+            affect_every_day=self.affect_every_day,
         )
 
     def to_qsettings(self, qs: QSettings):
@@ -269,6 +289,7 @@ class SettingsModel:
         qs.setValue("show_timeline_totals", self.show_timeline_totals)
         qs.setValue("sort_by_category", self.sort_by_category)
         qs.setValue("simulation_length_key", self.simulation_length_key)
+        qs.setValue("affect_every_day", self.affect_every_day)
 
         qs.setValue("has_run_before", True)
 
@@ -311,6 +332,9 @@ class SettingsModel:
         )
         sm.simulation_length_key = str(
             qs.value("simulation_length_key", sm.simulation_length_key)
+        )
+        sm.affect_every_day = (
+            str(qs.value("affect_every_day", sm.affect_every_day)).lower() == "true"
         )
         # enforce the constraints you chose
         sm.month_days = 30
