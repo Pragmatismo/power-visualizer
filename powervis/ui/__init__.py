@@ -61,6 +61,26 @@ from powervis.utils import (
     parse_duration_text,
     slugify,
 )
+
+CITY_LOCATIONS: List[Tuple[str, Optional[float], Optional[float]]] = [
+    ("Custom", None, None),
+    ("London, UK", 51.5074, -0.1278),
+    ("New York, USA", 40.7128, -74.0060),
+    ("Los Angeles, USA", 34.0522, -118.2437),
+    ("Toronto, Canada", 43.6532, -79.3832),
+    ("Sydney, Australia", -33.8688, 151.2093),
+    ("Melbourne, Australia", -37.8136, 144.9631),
+    ("Tokyo, Japan", 35.6762, 139.6503),
+    ("Singapore", 1.3521, 103.8198),
+    ("Paris, France", 48.8566, 2.3522),
+    ("Berlin, Germany", 52.5200, 13.4050),
+    ("Dubai, UAE", 25.2048, 55.2708),
+    ("Mumbai, India", 19.0760, 72.8777),
+    ("São Paulo, Brazil", -23.5505, -46.6333),
+    ("Cape Town, South Africa", -33.9249, 18.4241),
+]
+
+
 class SettingsDialog(QDialog):
     def __init__(
         self,
@@ -109,6 +129,30 @@ class SettingsDialog(QDialog):
         )
         self.simulation_length.setCurrentIndex(current_index)
         form.addRow("Simulation length", self.simulation_length)
+
+        location_group = QGroupBox("Location")
+        location_layout = QFormLayout(location_group)
+
+        self.location_combo = QComboBox()
+        for name, lat, lon in CITY_LOCATIONS:
+            self.location_combo.addItem(name, (lat, lon))
+        location_layout.addRow("City", self.location_combo)
+
+        self.location_lat = QDoubleSpinBox()
+        self.location_lat.setDecimals(5)
+        self.location_lat.setRange(-90.0, 90.0)
+        self.location_lat.setSingleStep(0.01)
+        self.location_lat.setValue(self.model.location_lat)
+        location_layout.addRow("Latitude", self.location_lat)
+
+        self.location_lon = QDoubleSpinBox()
+        self.location_lon.setDecimals(5)
+        self.location_lon.setRange(-180.0, 180.0)
+        self.location_lon.setSingleStep(0.01)
+        self.location_lon.setValue(self.model.location_lon)
+        location_layout.addRow("Longitude", self.location_lon)
+
+        layout.addWidget(location_group)
 
         # Tariff group
         tariff_group = QGroupBox("Electricity tariff")
@@ -177,7 +221,35 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
 
         self.use_tod.stateChanged.connect(self._update_enabled)
+        self.location_combo.currentIndexChanged.connect(self._on_location_changed)
+        self._set_location_from_model()
         self._update_enabled()
+
+    def _set_location_from_model(self):
+        index = 0
+        for i, (name, lat, lon) in enumerate(CITY_LOCATIONS):
+            if name == self.model.location_label and lat is not None and lon is not None:
+                index = i
+                self.location_lat.setValue(lat)
+                self.location_lon.setValue(lon)
+                break
+        else:
+            self.location_lat.setValue(self.model.location_lat)
+            self.location_lon.setValue(self.model.location_lon)
+        self.location_combo.setCurrentIndex(index)
+        self._set_location_enabled()
+
+    def _set_location_enabled(self):
+        is_custom = self.location_combo.currentText() == "Custom"
+        self.location_lat.setEnabled(is_custom)
+        self.location_lon.setEnabled(is_custom)
+
+    def _on_location_changed(self):
+        lat, lon = self.location_combo.currentData()
+        if lat is not None and lon is not None:
+            self.location_lat.setValue(lat)
+            self.location_lon.setValue(lon)
+        self._set_location_enabled()
 
     def _update_enabled(self):
         tod = self.use_tod.isChecked()
@@ -206,6 +278,10 @@ class SettingsDialog(QDialog):
             free_kw_threshold=float(self.free_kw.value()),
         ).normalized()
         m.free_rule = fr
+        current_label = self.location_combo.currentText()
+        m.location_label = current_label or "Custom"
+        m.location_lat = float(self.location_lat.value())
+        m.location_lon = float(self.location_lon.value())
         m.simulation_length_key = str(self.simulation_length.currentData())
         return m
 
