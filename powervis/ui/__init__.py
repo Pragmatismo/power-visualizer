@@ -3,6 +3,7 @@ import datetime
 import json
 from html import escape
 import math
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 
 from PySide6.QtCore import (
