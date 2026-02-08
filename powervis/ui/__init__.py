@@ -2620,6 +2620,131 @@ class DateDisplayButton(QPushButton):
         super().mouseReleaseEvent(event)
 
 
+class StartDateDialog(QDialog):
+    def __init__(self, parent=None, current_date: Optional[datetime.date] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Set start date")
+        self.setModal(True)
+
+        self.current_date = current_date or datetime.date.today()
+        self._manual_date = self.current_date
+        self.use_today_checkbox = QCheckBox("Use today")
+        self.use_today_checkbox.setChecked(True)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.use_today_checkbox)
+
+        controls = QWidget(self)
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(6)
+
+        self.prev_month_btn = QToolButton()
+        self.prev_month_btn.setText("⏮")
+        self.prev_month_btn.setToolTip("Jump to first day of previous month")
+        self.prev_month_btn.clicked.connect(self._jump_prev_month)
+
+        self.prev_day_btn = QToolButton()
+        self.prev_day_btn.setText("◀")
+        self.prev_day_btn.setToolTip("Go back one day")
+        self.prev_day_btn.clicked.connect(lambda: self._shift_day(-1))
+
+        self.date_button = DateDisplayButton()
+        self.date_button.setToolTip("Click to jump to today. Double-click to pick a date.")
+        self.date_button.clickedSingle.connect(self._jump_today)
+        self.date_button.doubleClicked.connect(self._pick_date)
+        self.date_button.setMinimumWidth(160)
+        self.date_button.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+
+        self.next_day_btn = QToolButton()
+        self.next_day_btn.setText("▶")
+        self.next_day_btn.setToolTip("Go forward one day")
+        self.next_day_btn.clicked.connect(lambda: self._shift_day(1))
+
+        self.next_month_btn = QToolButton()
+        self.next_month_btn.setText("⏭")
+        self.next_month_btn.setToolTip("Jump to first day of next month")
+        self.next_month_btn.clicked.connect(self._jump_next_month)
+
+        controls_layout.addWidget(self.prev_month_btn)
+        controls_layout.addWidget(self.prev_day_btn)
+        controls_layout.addWidget(self.date_button)
+        controls_layout.addWidget(self.next_day_btn)
+        controls_layout.addWidget(self.next_month_btn)
+        layout.addWidget(controls)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.use_today_checkbox.toggled.connect(self._update_controls)
+        self._update_date_display()
+        self._update_controls(self.use_today_checkbox.isChecked())
+
+    def _update_controls(self, use_today: bool):
+        if use_today:
+            self._manual_date = self.current_date
+            self.current_date = datetime.date.today()
+            self._update_date_display()
+        else:
+            self.current_date = self._manual_date
+            self._update_date_display()
+        for widget in (
+            self.prev_month_btn,
+            self.prev_day_btn,
+            self.date_button,
+            self.next_day_btn,
+            self.next_month_btn,
+        ):
+            widget.setEnabled(not use_today)
+
+    def _update_date_display(self):
+        self.date_button.setText(self.current_date.strftime("%a %d %b %Y"))
+
+    def _set_current_date(self, day: datetime.date):
+        self.current_date = day
+        if not self.use_today_checkbox.isChecked():
+            self._manual_date = day
+        self._update_date_display()
+
+    def _shift_day(self, delta: int):
+        self._set_current_date(self.current_date + datetime.timedelta(days=delta))
+
+    def _jump_prev_month(self):
+        first_of_current = self.current_date.replace(day=1)
+        prev_month_last = first_of_current - datetime.timedelta(days=1)
+        self._set_current_date(prev_month_last.replace(day=1))
+
+    def _jump_next_month(self):
+        year = self.current_date.year + (1 if self.current_date.month == 12 else 0)
+        month = 1 if self.current_date.month == 12 else self.current_date.month + 1
+        self._set_current_date(datetime.date(year, month, 1))
+
+    def _jump_today(self):
+        self._set_current_date(datetime.date.today())
+
+    def _pick_date(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select date")
+        layout = QVBoxLayout(dlg)
+        calendar = QCalendarWidget()
+        calendar.setSelectedDate(
+            QDate(self.current_date.year, self.current_date.month, self.current_date.day)
+        )
+        layout.addWidget(calendar)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        if dlg.exec() == QDialog.Accepted:
+            qdate = calendar.selectedDate()
+            self._set_current_date(datetime.date(qdate.year(), qdate.month(), qdate.day()))
+
+    def get_result(self) -> Tuple[bool, datetime.date]:
+        return self.use_today_checkbox.isChecked(), self.current_date
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2750,8 +2875,11 @@ class MainWindow(QMainWindow):
 
         timingm = mb.addMenu("&Timing")
         act_custom_periods = QAction("Custom Periods…", self)
+        act_set_start_date = QAction("Set Start Date…", self)
         timingm.addAction(act_custom_periods)
+        timingm.addAction(act_set_start_date)
         act_custom_periods.triggered.connect(self.open_custom_periods)
+        act_set_start_date.triggered.connect(self.open_start_date)
 
         tariffm = mb.addMenu("&Tariff")
         act_import_tariff = QAction("Import…", self)
@@ -2873,6 +3001,15 @@ class MainWindow(QMainWindow):
         if dlg.exec() == QDialog.Accepted:
             self.project.custom_periods = dlg.get_periods()
             self.recompute()
+
+    def open_start_date(self):
+        dlg = StartDateDialog(self, self.current_date)
+        if dlg.exec() == QDialog.Accepted:
+            use_today, selected_date = dlg.get_result()
+            if use_today:
+                self._set_current_date(datetime.date.today())
+            else:
+                self._set_current_date(selected_date)
 
     def open_device_list(self):
         dlg = DeviceListDialog(self, self.project)
@@ -3032,33 +3169,6 @@ class MainWindow(QMainWindow):
         self.affect_every_day_checkbox.setStyleSheet("QCheckBox { color: #d6d6de; }")
         self.affect_every_day_checkbox.toggled.connect(self._toggle_affect_every_day)
 
-        self.prev_month_btn = QToolButton()
-        self.prev_month_btn.setText("⏮")
-        self.prev_month_btn.setToolTip("Jump to first day of previous month")
-        self.prev_month_btn.clicked.connect(self._jump_prev_month)
-
-        self.prev_day_btn = QToolButton()
-        self.prev_day_btn.setText("◀")
-        self.prev_day_btn.setToolTip("Go back one day")
-        self.prev_day_btn.clicked.connect(lambda: self._shift_day(-1))
-
-        self.date_button = DateDisplayButton()
-        self.date_button.setToolTip("Click to jump to today. Double-click to pick a date.")
-        self.date_button.clickedSingle.connect(self._jump_today)
-        self.date_button.doubleClicked.connect(self._pick_date)
-        self.date_button.setMinimumWidth(160)
-        self.date_button.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
-
-        self.next_day_btn = QToolButton()
-        self.next_day_btn.setText("▶")
-        self.next_day_btn.setToolTip("Go forward one day")
-        self.next_day_btn.clicked.connect(lambda: self._shift_day(1))
-
-        self.next_month_btn = QToolButton()
-        self.next_month_btn.setText("⏭")
-        self.next_month_btn.setToolTip("Jump to first day of next month")
-        self.next_month_btn.clicked.connect(self._jump_next_month)
-
         self.zoom_out_btn = QToolButton()
         self.zoom_out_btn.setText("−")
         self.zoom_out_btn.setToolTip("Zoom out")
@@ -3074,17 +3184,11 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.affect_every_day_checkbox)
         layout.addSpacing(8)
-        layout.addWidget(self.prev_month_btn)
-        layout.addWidget(self.prev_day_btn)
-        layout.addWidget(self.date_button)
-        layout.addWidget(self.next_day_btn)
-        layout.addWidget(self.next_month_btn)
         layout.addSpacing(12)
         layout.addWidget(self.zoom_label)
         layout.addWidget(self.zoom_out_btn)
         layout.addWidget(self.zoom_in_btn)
 
-        self._update_date_display()
         self._update_zoom_display()
         self.timeline_controls.adjustSize()
         self.timeline_controls.raise_()
