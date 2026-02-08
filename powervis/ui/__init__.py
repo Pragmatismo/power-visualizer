@@ -1428,9 +1428,15 @@ class TimelineWidget(QAbstractScrollArea):
             widest = max(widest, name_metrics.horizontalAdvance("Total Power"))
         self.left_label_w = max(160, widest + self.label_pad * 2)
 
+    def _info_panel_visible(self) -> bool:
+        return bool(self.settings and self.settings.show_timeline_totals)
+
     def _update_right_info_width(self):
+        if not self._info_panel_visible():
+            self.right_info_w = 0
+            return
         if not (self.project and self.settings and self.sim):
-            self.right_info_w = 240
+            self.right_info_w = 0
             return
         metrics = QFontMetrics(self.info_font)
         max_kwh = 0.0
@@ -1454,7 +1460,7 @@ class TimelineWidget(QAbstractScrollArea):
                 text_width = max(text_width, metrics.horizontalAdvance(amp_text))
         diameter = max(6, self.row_h - 16)
         info_inner_width = 4 + diameter + 10 + text_width + 4
-        self.right_info_w = max(180, info_inner_width + 12)
+        self.right_info_w = max(0, info_inner_width + 12)
 
     def _update_axis_layout(self):
         if not self.project:
@@ -1503,8 +1509,9 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _timeline_rect(self) -> QRect:
         vp = self.viewport().rect()
+        info_gap = 12 if self._info_panel_visible() else 0
         return QRect(self.left_label_w, self.top_tariff_h + self.axis_h,
-                     vp.width() - self.left_label_w - self.right_info_w - 12,
+                     vp.width() - self.left_label_w - self.right_info_w - info_gap,
                      vp.height() - self.top_tariff_h - self.axis_h - 12)
 
     def timeline_draw_width(self) -> int:
@@ -1543,17 +1550,27 @@ class TimelineWidget(QAbstractScrollArea):
         return QRect(self.label_pad, rr.top(), self.left_label_w - self.label_pad * 2, rr.height())
 
     def _device_info_rect(self, idx: int) -> QRect:
+        if not self._info_panel_visible():
+            return QRect()
         rr = self._row_rect(idx)
         x = rr.right() + 6
         return QRect(x, rr.top(), self.right_info_w - 12, rr.height())
 
     def _total_info_rect(self, rr: QRect) -> QRect:
+        if not self._info_panel_visible():
+            return QRect()
         x = rr.right() + 6
         return QRect(x, rr.top(), self.right_info_w - 12, rr.height())
 
     def _tariff_rect(self) -> QRect:
         vp = self.viewport().rect()
-        return QRect(self.left_label_w, 6, vp.width() - self.left_label_w - self.right_info_w - 12, self.top_tariff_h - 8)
+        info_gap = 12 if self._info_panel_visible() else 0
+        return QRect(
+            self.left_label_w,
+            6,
+            vp.width() - self.left_label_w - self.right_info_w - info_gap,
+            self.top_tariff_h - 8,
+        )
 
     def _scroll_offset(self) -> int:
         return self.horizontalScrollBar().value()
@@ -1647,6 +1664,10 @@ class TimelineWidget(QAbstractScrollArea):
 
         # Draw time axis
         self._paint_axis(p)
+
+        # Draw timeline totals panel background
+        if self._info_panel_visible():
+            self._paint_info_panel(p)
 
         # Draw device rows
         for row_index, dev_index in enumerate(self.visible_device_indices):
@@ -1806,6 +1827,20 @@ class TimelineWidget(QAbstractScrollArea):
         p.setPen(QColor(90, 90, 100))
         p.drawLine(tl.left(), axis_baseline, tl.right(), axis_baseline)
 
+    def _paint_info_panel(self, p: QPainter):
+        if not self._info_panel_visible():
+            return
+        tl = self._timeline_rect()
+        panel_rect = QRect(tl.right() + 6, tl.top(), self.right_info_w - 12, tl.height())
+        if panel_rect.width() <= 0 or panel_rect.height() <= 0:
+            return
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(26, 26, 30))
+        p.drawRect(panel_rect)
+        p.setPen(QPen(QColor(45, 45, 52), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(panel_rect)
+
     def _paint_row(self, p: QPainter, row_index: int, dev_index: int, dev: Device):
         rr = self._row_rect(row_index)
         # row background
@@ -1895,6 +1930,8 @@ class TimelineWidget(QAbstractScrollArea):
         p.drawRect(rr)
 
         # right info
+        if not self._info_panel_visible():
+            return
         info = self._device_info_rect(row_index)
         on_min = self.sim.per_device_on_minutes[dev_index] if self.sim else 0
         kwh = self.sim.per_device_kwh_day[dev_index] if self.sim else 0.0
@@ -1975,6 +2012,8 @@ class TimelineWidget(QAbstractScrollArea):
         p.setBrush(Qt.NoBrush)
         p.drawRect(rr)
 
+        if not self._info_panel_visible():
+            return
         info = self._total_info_rect(rr)
         p.setPen(QColor(220, 220, 230))
         p.setFont(self.info_font)
@@ -2449,6 +2488,11 @@ class MainWindow(QMainWindow):
         act_show_amps.setChecked(self.settings_model.show_amps)
         viewm.addAction(act_show_amps)
 
+        act_timeline_totals = QAction("Timeline Totals", self)
+        act_timeline_totals.setCheckable(True)
+        act_timeline_totals.setChecked(self.settings_model.show_timeline_totals)
+        viewm.addAction(act_timeline_totals)
+
         viewm.addSeparator()
         act_show_standing = QAction("Show Standing Charge", self)
         act_show_standing.setCheckable(True)
@@ -2456,6 +2500,7 @@ class MainWindow(QMainWindow):
         viewm.addAction(act_show_standing)
         act_show_total_power.toggled.connect(self._toggle_total_power)
         act_show_amps.toggled.connect(self._toggle_show_amps)
+        act_timeline_totals.toggled.connect(self._toggle_timeline_totals)
         act_show_standing.toggled.connect(self._toggle_standing_charge)
 
         helpm = mb.addMenu("&Help")
@@ -2983,6 +3028,11 @@ class MainWindow(QMainWindow):
 
     def _toggle_total_power(self, enabled: bool):
         self.settings_model.show_total_power = enabled
+        self.settings_model.to_qsettings(self.qs)
+        self.recompute()
+
+    def _toggle_timeline_totals(self, enabled: bool):
+        self.settings_model.show_timeline_totals = enabled
         self.settings_model.to_qsettings(self.qs)
         self.recompute()
 

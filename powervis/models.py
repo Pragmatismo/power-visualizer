@@ -211,6 +211,7 @@ class SettingsModel:
     show_standing_charge: bool = False
     show_amps: bool = False
     show_total_power: bool = True
+    show_timeline_totals: bool = True
     simulation_length_key: str = "1_week"
 
     def clone(self) -> "SettingsModel":
@@ -239,6 +240,7 @@ class SettingsModel:
             show_standing_charge=self.show_standing_charge,
             show_amps=self.show_amps,
             show_total_power=self.show_total_power,
+            show_timeline_totals=self.show_timeline_totals,
             simulation_length_key=self.simulation_length_key,
         )
 
@@ -262,6 +264,7 @@ class SettingsModel:
         qs.setValue("show_standing_charge", self.show_standing_charge)
         qs.setValue("show_amps", self.show_amps)
         qs.setValue("show_total_power", self.show_total_power)
+        qs.setValue("show_timeline_totals", self.show_timeline_totals)
         qs.setValue("simulation_length_key", self.simulation_length_key)
 
         qs.setValue("has_run_before", True)
@@ -296,6 +299,9 @@ class SettingsModel:
         )
         sm.show_total_power = (
             str(qs.value("show_total_power", sm.show_total_power)).lower() == "true"
+        )
+        sm.show_timeline_totals = (
+            str(qs.value("show_timeline_totals", sm.show_timeline_totals)).lower() == "true"
         )
         sm.simulation_length_key = str(
             qs.value("simulation_length_key", sm.simulation_length_key)
