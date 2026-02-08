@@ -1341,6 +1341,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.sim: Optional[SimResult] = None
         self.reference_date: Optional[datetime.date] = None
         self.visible_device_indices: List[int] = []
+        self.row_items: List[Dict[str, object]] = []
 
         # layout constants
         self.left_label_w = 220
@@ -1373,6 +1374,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.font = QFont("Sans", 9)
         self.tariff_font = QFont("Sans", 15)
         self.name_font = QFont("Sans", 10, QFont.DemiBold)
+        self.category_font = QFont("Sans", 9, QFont.Bold)
         self.tariff_company_font = QFont(self.name_font)
         self.tariff_company_font.setWeight(QFont.Bold)
         self.tariff_label_font = QFont(self.name_font)
@@ -1400,6 +1402,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.sim = sim
         self.reference_date = day
         self._update_visible_devices()
+        self._build_row_items()
         self._update_left_label_width()
         self._update_axis_layout()
         self._update_scrollbar()
@@ -1415,6 +1418,31 @@ class TimelineWidget(QAbstractScrollArea):
         self.visible_device_indices = [
             idx for idx, dev in enumerate(self.project.devices) if dev.enabled
         ]
+        if self.settings and self.settings.sort_by_category:
+            self.visible_device_indices.sort(
+                key=lambda idx: (
+                    (self.project.devices[idx].category or "").strip().lower(),
+                    self.project.devices[idx].name.strip().lower(),
+                    idx,
+                )
+            )
+
+    def _build_row_items(self):
+        self.row_items = []
+        if not self.project:
+            return
+        if not (self.settings and self.settings.sort_by_category):
+            for idx in self.visible_device_indices:
+                self.row_items.append({"type": "device", "device_index": idx})
+            return
+        current_category = None
+        for idx in self.visible_device_indices:
+            dev = self.project.devices[idx]
+            category = (dev.category or "").strip() or "Uncategorized"
+            if category != current_category:
+                self.row_items.append({"type": "category", "label": category})
+                current_category = category
+            self.row_items.append({"type": "device", "device_index": idx})
 
     def _update_left_label_width(self):
         if not self.project:
@@ -1422,14 +1450,18 @@ class TimelineWidget(QAbstractScrollArea):
             return
         name_metrics = QFontMetrics(self.name_font)
         power_metrics = QFontMetrics(self.power_font)
+        category_metrics = QFontMetrics(self.category_font)
         widest = 0
-        for idx in self.visible_device_indices:
-            dev = self.project.devices[idx]
-            widest = max(
-                widest,
-                name_metrics.horizontalAdvance(dev.name),
-                power_metrics.horizontalAdvance(f"{dev.power_w:g} W"),
-            )
+        for item in self.row_items:
+            if item["type"] == "device":
+                dev = self.project.devices[item["device_index"]]
+                widest = max(
+                    widest,
+                    name_metrics.horizontalAdvance(dev.name),
+                    power_metrics.horizontalAdvance(f"{dev.power_w:g} W"),
+                )
+            elif item["type"] == "category":
+                widest = max(widest, category_metrics.horizontalAdvance(str(item["label"])))
         if self.settings and self.settings.show_total_power:
             widest = max(widest, name_metrics.horizontalAdvance("Total Power"))
         self.left_label_w = max(160, widest + self.label_pad * 2)
@@ -1472,7 +1504,7 @@ class TimelineWidget(QAbstractScrollArea):
         h = (
             self.top_tariff_h
             + self.axis_h
-            + (len(self.visible_device_indices) * (self.row_h + self.row_gap))
+            + (len(self.row_items) * (self.row_h + self.row_gap))
             + total_row_h
             + total_row_gap
             + 20
@@ -1516,7 +1548,7 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _total_row_rect(self) -> QRect:
         tl = self._timeline_rect()
-        y0 = tl.top() + len(self.visible_device_indices) * (self.row_h + self.row_gap)
+        y0 = tl.top() + len(self.row_items) * (self.row_h + self.row_gap)
         return QRect(tl.left(), y0, tl.width(), self._total_row_height())
 
     def _device_label_rect(self, idx: int) -> QRect:
@@ -1632,9 +1664,13 @@ class TimelineWidget(QAbstractScrollArea):
         self._paint_axis(p)
 
         # Draw device rows
-        for row_index, dev_index in enumerate(self.visible_device_indices):
-            dev = self.project.devices[dev_index]
-            self._paint_row(p, row_index, dev_index, dev)
+        for row_index, item in enumerate(self.row_items):
+            if item["type"] == "category":
+                self._paint_category_row(p, row_index, str(item["label"]))
+            else:
+                dev_index = int(item["device_index"])
+                dev = self.project.devices[dev_index]
+                self._paint_row(p, row_index, dev_index, dev)
         self._paint_total_row(p)
 
     def resizeEvent(self, event):
@@ -1888,6 +1924,22 @@ class TimelineWidget(QAbstractScrollArea):
         p.setBrush(Qt.NoBrush)
         p.drawRect(rr)
 
+    def _paint_category_row(self, p: QPainter, row_index: int, label: str):
+        rr = self._row_rect(row_index)
+        bg = QColor(22, 22, 26)
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRect(rr)
+
+        lr = self._device_label_rect(row_index)
+        p.setPen(QColor(190, 190, 205))
+        p.setFont(self.category_font)
+        p.drawText(lr, Qt.AlignLeft | Qt.AlignVCenter, label)
+
+        p.setPen(QPen(QColor(55, 55, 62), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(rr)
+
     def _paint_total_row(self, p: QPainter):
         if not (self.project and self.sim and self.settings and self.settings.show_total_power):
             return
@@ -2124,10 +2176,12 @@ class TimelineWidget(QAbstractScrollArea):
         if pos.y() < tl.top() or pos.y() > tl.bottom():
             return -1, -1
         # check each visible row rect
-        for row_index, dev_index in enumerate(self.visible_device_indices):
+        for row_index, item in enumerate(self.row_items):
             rr = self._row_rect(row_index)
             if rr.contains(pos):
-                return row_index, dev_index
+                if item["type"] == "device":
+                    return row_index, int(item["device_index"])
+                return -1, -1
         return -1, -1
 
     def _hit_test(self, pos: QPoint) -> HitTest:
@@ -2279,7 +2333,7 @@ class TimelineTotalsPanel(QWidget):
 
     def _total_row_rect(self) -> QRect:
         panel_rect = self._panel_rect()
-        y0 = panel_rect.top() + len(self.timeline.visible_device_indices) * (
+        y0 = panel_rect.top() + len(self.timeline.row_items) * (
             self.timeline.row_h + self.timeline.row_gap
         )
         return QRect(panel_rect.left(), y0, panel_rect.width(), self.timeline._total_row_height())
@@ -2305,10 +2359,13 @@ class TimelineTotalsPanel(QWidget):
         p.setBrush(Qt.NoBrush)
         p.drawRect(panel_rect)
 
-        for row_index, dev_index in enumerate(self.timeline.visible_device_indices):
+        for row_index, item in enumerate(self.timeline.row_items):
             rr = self._row_rect(row_index)
             if rr.bottom() < panel_rect.top() or rr.top() > panel_rect.bottom():
                 continue
+            if item["type"] != "device":
+                continue
+            dev_index = int(item["device_index"])
             info = QRect(rr.left() + 6, rr.top(), rr.width() - 12, rr.height())
             on_min = self.timeline.sim.per_device_on_minutes[dev_index]
             kwh = self.timeline.sim.per_device_kwh_day[dev_index]
@@ -2569,6 +2626,12 @@ class MainWindow(QMainWindow):
         viewm.addAction(act_timeline_totals)
 
         viewm.addSeparator()
+        act_sort_by_category = QAction("Sort by Category", self)
+        act_sort_by_category.setCheckable(True)
+        act_sort_by_category.setChecked(self.settings_model.sort_by_category)
+        viewm.addAction(act_sort_by_category)
+
+        viewm.addSeparator()
         act_show_standing = QAction("Show Standing Charge", self)
         act_show_standing.setCheckable(True)
         act_show_standing.setChecked(self.settings_model.show_standing_charge)
@@ -2576,6 +2639,7 @@ class MainWindow(QMainWindow):
         act_show_total_power.toggled.connect(self._toggle_total_power)
         act_show_amps.toggled.connect(self._toggle_show_amps)
         act_timeline_totals.toggled.connect(self._toggle_timeline_totals)
+        act_sort_by_category.toggled.connect(self._toggle_sort_by_category)
         act_show_standing.toggled.connect(self._toggle_standing_charge)
 
         helpm = mb.addMenu("&Help")
@@ -3111,6 +3175,11 @@ class MainWindow(QMainWindow):
         self.settings_model.show_timeline_totals = enabled
         self.settings_model.to_qsettings(self.qs)
         self.timeline_totals.sync_from_timeline()
+        self.recompute()
+
+    def _toggle_sort_by_category(self, enabled: bool):
+        self.settings_model.sort_by_category = enabled
+        self.settings_model.to_qsettings(self.qs)
         self.recompute()
 
 
