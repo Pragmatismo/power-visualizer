@@ -233,6 +233,9 @@ class SettingsModel:
     sort_by_category: bool = False
     simulation_length_key: str = "1_week"
     affect_every_day: bool = True
+    location_label: str = "Custom"
+    location_lat: float = 51.5074
+    location_lon: float = -0.1278
 
     def clone(self) -> "SettingsModel":
         return SettingsModel(
@@ -264,6 +267,9 @@ class SettingsModel:
             sort_by_category=self.sort_by_category,
             simulation_length_key=self.simulation_length_key,
             affect_every_day=self.affect_every_day,
+            location_label=self.location_label,
+            location_lat=self.location_lat,
+            location_lon=self.location_lon,
         )
 
     def to_qsettings(self, qs: QSettings):
@@ -290,6 +296,9 @@ class SettingsModel:
         qs.setValue("sort_by_category", self.sort_by_category)
         qs.setValue("simulation_length_key", self.simulation_length_key)
         qs.setValue("affect_every_day", self.affect_every_day)
+        qs.setValue("location_label", self.location_label)
+        qs.setValue("location_lat", self.location_lat)
+        qs.setValue("location_lon", self.location_lon)
 
         qs.setValue("has_run_before", True)
 
@@ -336,6 +345,9 @@ class SettingsModel:
         sm.affect_every_day = (
             str(qs.value("affect_every_day", sm.affect_every_day)).lower() == "true"
         )
+        sm.location_label = str(qs.value("location_label", sm.location_label))
+        sm.location_lat = float(qs.value("location_lat", sm.location_lat))
+        sm.location_lon = float(qs.value("location_lon", sm.location_lon))
         # enforce the constraints you chose
         sm.month_days = 30
         sm.step_minutes = 1
