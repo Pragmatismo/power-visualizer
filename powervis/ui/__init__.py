@@ -1344,7 +1344,6 @@ class TimelineWidget(QAbstractScrollArea):
 
         # layout constants
         self.left_label_w = 220
-        self.right_info_w = 240
         self.top_tariff_h = 56
         self.row_h = 44
         self.row_gap = 6
@@ -1382,6 +1381,12 @@ class TimelineWidget(QAbstractScrollArea):
         self.info_font = QFont("Sans", 11)
         self.setMinimumHeight(400)
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+        self.info_panel: Optional["TimelineTotalsPanel"] = None
+
+    def set_info_panel(self, panel: Optional["TimelineTotalsPanel"]):
+        self.info_panel = panel
+        if self.info_panel:
+            self.info_panel.sync_from_timeline()
 
     def set_data(
         self,
@@ -1396,11 +1401,12 @@ class TimelineWidget(QAbstractScrollArea):
         self.reference_date = day
         self._update_visible_devices()
         self._update_left_label_width()
-        self._update_right_info_width()
         self._update_axis_layout()
         self._update_scrollbar()
         self.updateGeometry()
         self._refresh_viewport()
+        if self.info_panel:
+            self.info_panel.sync_from_timeline()
 
     def _update_visible_devices(self):
         if not self.project:
@@ -1427,40 +1433,6 @@ class TimelineWidget(QAbstractScrollArea):
         if self.settings and self.settings.show_total_power:
             widest = max(widest, name_metrics.horizontalAdvance("Total Power"))
         self.left_label_w = max(160, widest + self.label_pad * 2)
-
-    def _info_panel_visible(self) -> bool:
-        return bool(self.settings and self.settings.show_timeline_totals)
-
-    def _update_right_info_width(self):
-        if not self._info_panel_visible():
-            self.right_info_w = 0
-            return
-        if not (self.project and self.settings and self.sim):
-            self.right_info_w = 0
-            return
-        metrics = QFontMetrics(self.info_font)
-        max_kwh = 0.0
-        max_cost = 0.0
-        for idx in self.visible_device_indices:
-            max_kwh = max(max_kwh, self.sim.per_device_kwh_day[idx])
-            max_cost = max(max_cost, self.sim.per_device_cost_day[idx])
-        kwh_text = f"▲ {max_kwh:.2f} kWh"
-        cost_text = f"▼ {self.settings.currency_symbol}{max_cost:.2f}"
-        text_width = max(
-            metrics.horizontalAdvance(kwh_text),
-            metrics.horizontalAdvance(cost_text),
-        )
-        if self.settings.show_total_power:
-            peak_value = max(self.sim.minute_total_w) if self.sim.minute_total_w else 0.0
-            peak_text = f"Peak: {peak_value:.0f} W"
-            text_width = max(text_width, metrics.horizontalAdvance(peak_text))
-            if self.settings.show_amps:
-                amps = peak_value / max(self.settings.mains_voltage, 0.1)
-                amp_text = f"Peak: {amps:.1f} A"
-                text_width = max(text_width, metrics.horizontalAdvance(amp_text))
-        diameter = max(6, self.row_h - 16)
-        info_inner_width = 4 + diameter + 10 + text_width + 4
-        self.right_info_w = max(0, info_inner_width + 12)
 
     def _update_axis_layout(self):
         if not self.project:
@@ -1509,10 +1481,12 @@ class TimelineWidget(QAbstractScrollArea):
 
     def _timeline_rect(self) -> QRect:
         vp = self.viewport().rect()
-        info_gap = 12 if self._info_panel_visible() else 0
-        return QRect(self.left_label_w, self.top_tariff_h + self.axis_h,
-                     vp.width() - self.left_label_w - self.right_info_w - info_gap,
-                     vp.height() - self.top_tariff_h - self.axis_h - 12)
+        return QRect(
+            self.left_label_w,
+            self.top_tariff_h + self.axis_h,
+            vp.width() - self.left_label_w,
+            vp.height() - self.top_tariff_h - self.axis_h - 12,
+        )
 
     def timeline_draw_width(self) -> int:
         return self._timeline_rect().width()
@@ -1549,26 +1523,12 @@ class TimelineWidget(QAbstractScrollArea):
         rr = self._row_rect(idx)
         return QRect(self.label_pad, rr.top(), self.left_label_w - self.label_pad * 2, rr.height())
 
-    def _device_info_rect(self, idx: int) -> QRect:
-        if not self._info_panel_visible():
-            return QRect()
-        rr = self._row_rect(idx)
-        x = rr.right() + 6
-        return QRect(x, rr.top(), self.right_info_w - 12, rr.height())
-
-    def _total_info_rect(self, rr: QRect) -> QRect:
-        if not self._info_panel_visible():
-            return QRect()
-        x = rr.right() + 6
-        return QRect(x, rr.top(), self.right_info_w - 12, rr.height())
-
     def _tariff_rect(self) -> QRect:
         vp = self.viewport().rect()
-        info_gap = 12 if self._info_panel_visible() else 0
         return QRect(
             self.left_label_w,
             6,
-            vp.width() - self.left_label_w - self.right_info_w - info_gap,
+            vp.width() - self.left_label_w,
             self.top_tariff_h - 8,
         )
 
@@ -1633,6 +1593,8 @@ class TimelineWidget(QAbstractScrollArea):
         self._update_axis_layout()
         self._update_scrollbar()
         self._refresh_viewport()
+        if self.info_panel:
+            self.info_panel.sync_from_timeline()
 
     def set_time_range(self, start_min: int, end_min: int):
         start = int(start_min)
@@ -1644,9 +1606,13 @@ class TimelineWidget(QAbstractScrollArea):
         self._update_axis_layout()
         self._update_scrollbar()
         self._refresh_viewport()
+        if self.info_panel:
+            self.info_panel.sync_from_timeline()
 
     def _refresh_viewport(self):
         self.viewport().update()
+        if self.info_panel:
+            self.info_panel.update()
 
     def paintEvent(self, event):
         p = QPainter(self.viewport())
@@ -1665,10 +1631,6 @@ class TimelineWidget(QAbstractScrollArea):
         # Draw time axis
         self._paint_axis(p)
 
-        # Draw timeline totals panel background
-        if self._info_panel_visible():
-            self._paint_info_panel(p)
-
         # Draw device rows
         for row_index, dev_index in enumerate(self.visible_device_indices):
             dev = self.project.devices[dev_index]
@@ -1679,6 +1641,8 @@ class TimelineWidget(QAbstractScrollArea):
         super().resizeEvent(event)
         self._update_axis_layout()
         self._update_scrollbar()
+        if self.info_panel:
+            self.info_panel.sync_from_timeline()
 
     def _paint_tariff(self, p: QPainter):
         tr = self._tariff_rect()
@@ -1827,20 +1791,6 @@ class TimelineWidget(QAbstractScrollArea):
         p.setPen(QColor(90, 90, 100))
         p.drawLine(tl.left(), axis_baseline, tl.right(), axis_baseline)
 
-    def _paint_info_panel(self, p: QPainter):
-        if not self._info_panel_visible():
-            return
-        tl = self._timeline_rect()
-        panel_rect = QRect(tl.right() + 6, tl.top(), self.right_info_w - 12, tl.height())
-        if panel_rect.width() <= 0 or panel_rect.height() <= 0:
-            return
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(26, 26, 30))
-        p.drawRect(panel_rect)
-        p.setPen(QPen(QColor(45, 45, 52), 1))
-        p.setBrush(Qt.NoBrush)
-        p.drawRect(panel_rect)
-
     def _paint_row(self, p: QPainter, row_index: int, dev_index: int, dev: Device):
         rr = self._row_rect(row_index)
         # row background
@@ -1929,47 +1879,6 @@ class TimelineWidget(QAbstractScrollArea):
         p.setBrush(Qt.NoBrush)
         p.drawRect(rr)
 
-        # right info
-        if not self._info_panel_visible():
-            return
-        info = self._device_info_rect(row_index)
-        on_min = self.sim.per_device_on_minutes[dev_index] if self.sim else 0
-        kwh = self.sim.per_device_kwh_day[dev_index] if self.sim else 0.0
-        cost = self.sim.per_device_cost_day[dev_index] if self.sim else 0.0
-        bar_height = rr.height() - 16
-        diameter = max(6, min(bar_height, info.height() - 8))
-        circle_rect = QRect(
-            info.left() + 4,
-            info.top() + (info.height() - diameter) // 2,
-            diameter,
-            diameter,
-        )
-        on_ratio = clamp(on_min / MINUTES_PER_DAY, 0.0, 1.0)
-        p.save()
-        p.setRenderHint(QPainter.Antialiasing, True)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(200, 70, 70))
-        p.drawEllipse(circle_rect)
-        p.setBrush(QColor(80, 180, 90))
-        on_span = int(on_ratio * 360 * 16)
-        p.drawPie(circle_rect, 90 * 16, -on_span)
-        p.restore()
-
-        text_x = circle_rect.right() + 10
-        text_rect = QRect(text_x, info.top(), info.right() - text_x, info.height())
-        p.setPen(QColor(220, 220, 230))
-        p.setFont(self.info_font)
-        metrics = QFontMetrics(self.info_font)
-        line_h = metrics.height()
-        total_h = line_h * 2
-        start_y = text_rect.top() + (text_rect.height() - total_h) // 2
-        kwh_text = f"{kwh:.2f} kWh"
-        cost_text = f"{self.settings.currency_symbol}{cost:.2f}"
-        p.drawText(QRect(text_rect.left(), start_y, text_rect.width(), line_h),
-                   Qt.AlignLeft | Qt.AlignVCenter, f"▲ {kwh_text}")
-        p.drawText(QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
-                   Qt.AlignLeft | Qt.AlignVCenter, f"▼ {cost_text}")
-
     def _paint_total_row(self, p: QPainter):
         if not (self.project and self.sim and self.settings and self.settings.show_total_power):
             return
@@ -2012,27 +1921,7 @@ class TimelineWidget(QAbstractScrollArea):
         p.setBrush(Qt.NoBrush)
         p.drawRect(rr)
 
-        if not self._info_panel_visible():
-            return
-        info = self._total_info_rect(rr)
-        p.setPen(QColor(220, 220, 230))
-        p.setFont(self.info_font)
-        metrics = QFontMetrics(self.info_font)
-        line_h = metrics.height()
-        text_rect = QRect(info.left(), info.top(), info.width(), info.height())
-        if self.settings.show_amps:
-            amps = peak / max(self.settings.mains_voltage, 0.1)
-            total_h = line_h * 2
-            start_y = text_rect.top() + (text_rect.height() - total_h) // 2
-            peak_w_text = f"Peak: {peak:.0f} W"
-            peak_a_text = f"Peak: {amps:.1f} A"
-            p.drawText(QRect(text_rect.left(), start_y, text_rect.width(), line_h),
-                       Qt.AlignLeft | Qt.AlignVCenter, peak_w_text)
-            p.drawText(QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
-                       Qt.AlignLeft | Qt.AlignVCenter, peak_a_text)
-        else:
-            peak_text = f"Peak: {peak:.0f} W"
-            p.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, peak_text)
+        return
 
     def _draw_block(
         self,
@@ -2322,6 +2211,173 @@ class TimelineWidget(QAbstractScrollArea):
         self._refresh_viewport()
 
 
+class TimelineTotalsPanel(QWidget):
+    def __init__(self, timeline: TimelineWidget, parent=None):
+        super().__init__(parent)
+        self.timeline = timeline
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setMinimumWidth(0)
+
+    def _info_panel_visible(self) -> bool:
+        return bool(self.timeline.settings and self.timeline.settings.show_timeline_totals)
+
+    def sync_from_timeline(self):
+        if not self._info_panel_visible():
+            self.setVisible(False)
+            self.setFixedWidth(0)
+            return
+        self.setVisible(True)
+        self._update_panel_width()
+        self.updateGeometry()
+        self.update()
+
+    def _update_panel_width(self):
+        if not (self.timeline.project and self.timeline.settings and self.timeline.sim):
+            self.setFixedWidth(0)
+            return
+        metrics = QFontMetrics(self.timeline.info_font)
+        max_kwh = 0.0
+        max_cost = 0.0
+        for idx in self.timeline.visible_device_indices:
+            max_kwh = max(max_kwh, self.timeline.sim.per_device_kwh_day[idx])
+            max_cost = max(max_cost, self.timeline.sim.per_device_cost_day[idx])
+        kwh_text = f"▲ {max_kwh:.2f} kWh"
+        cost_text = f"▼ {self.timeline.settings.currency_symbol}{max_cost:.2f}"
+        text_width = max(
+            metrics.horizontalAdvance(kwh_text),
+            metrics.horizontalAdvance(cost_text),
+        )
+        if self.timeline.settings.show_total_power:
+            peak_value = max(self.timeline.sim.minute_total_w) if self.timeline.sim.minute_total_w else 0.0
+            peak_text = f"Peak: {peak_value:.0f} W"
+            text_width = max(text_width, metrics.horizontalAdvance(peak_text))
+            if self.timeline.settings.show_amps:
+                amps = peak_value / max(self.timeline.settings.mains_voltage, 0.1)
+                amp_text = f"Peak: {amps:.1f} A"
+                text_width = max(text_width, metrics.horizontalAdvance(amp_text))
+        diameter = max(6, self.timeline.row_h - 16)
+        info_inner_width = 4 + diameter + 10 + text_width + 4
+        self.setFixedWidth(max(0, info_inner_width + 12))
+
+    def _panel_rect(self) -> QRect:
+        content_top = self.timeline.top_tariff_h + self.timeline.axis_h
+        return QRect(0, content_top, self.width(), self.height() - content_top - 12)
+
+    def _row_rect(self, idx: int) -> QRect:
+        panel_rect = self._panel_rect()
+        y0 = panel_rect.top() + idx * (self.timeline.row_h + self.timeline.row_gap)
+        return QRect(panel_rect.left(), y0, panel_rect.width(), self.timeline.row_h)
+
+    def _total_row_rect(self) -> QRect:
+        panel_rect = self._panel_rect()
+        y0 = panel_rect.top() + len(self.timeline.visible_device_indices) * (
+            self.timeline.row_h + self.timeline.row_gap
+        )
+        return QRect(panel_rect.left(), y0, panel_rect.width(), self.timeline._total_row_height())
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, False)
+        p.fillRect(self.rect(), QColor(25, 25, 28))
+
+        if not self._info_panel_visible():
+            return
+        if not (self.timeline.project and self.timeline.settings and self.timeline.sim):
+            return
+
+        panel_rect = self._panel_rect()
+        if panel_rect.width() <= 0 or panel_rect.height() <= 0:
+            return
+
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(26, 26, 30))
+        p.drawRect(panel_rect)
+        p.setPen(QPen(QColor(45, 45, 52), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(panel_rect)
+
+        for row_index, dev_index in enumerate(self.timeline.visible_device_indices):
+            rr = self._row_rect(row_index)
+            if rr.bottom() < panel_rect.top() or rr.top() > panel_rect.bottom():
+                continue
+            info = QRect(rr.left() + 6, rr.top(), rr.width() - 12, rr.height())
+            on_min = self.timeline.sim.per_device_on_minutes[dev_index]
+            kwh = self.timeline.sim.per_device_kwh_day[dev_index]
+            cost = self.timeline.sim.per_device_cost_day[dev_index]
+            bar_height = rr.height() - 16
+            diameter = max(6, min(bar_height, info.height() - 8))
+            circle_rect = QRect(
+                info.left() + 4,
+                info.top() + (info.height() - diameter) // 2,
+                diameter,
+                diameter,
+            )
+            on_ratio = clamp(on_min / MINUTES_PER_DAY, 0.0, 1.0)
+            p.save()
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(200, 70, 70))
+            p.drawEllipse(circle_rect)
+            p.setBrush(QColor(80, 180, 90))
+            on_span = int(on_ratio * 360 * 16)
+            p.drawPie(circle_rect, 90 * 16, -on_span)
+            p.restore()
+
+            text_x = circle_rect.right() + 10
+            text_rect = QRect(text_x, info.top(), info.right() - text_x, info.height())
+            p.setPen(QColor(220, 220, 230))
+            p.setFont(self.timeline.info_font)
+            metrics = QFontMetrics(self.timeline.info_font)
+            line_h = metrics.height()
+            total_h = line_h * 2
+            start_y = text_rect.top() + (text_rect.height() - total_h) // 2
+            kwh_text = f"{kwh:.2f} kWh"
+            cost_text = f"{self.timeline.settings.currency_symbol}{cost:.2f}"
+            p.drawText(
+                QRect(text_rect.left(), start_y, text_rect.width(), line_h),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                f"▲ {kwh_text}",
+            )
+            p.drawText(
+                QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                f"▼ {cost_text}",
+            )
+
+        if not self.timeline.settings.show_total_power:
+            return
+
+        rr = self._total_row_rect()
+        if rr.height() <= 0:
+            return
+        info = QRect(rr.left() + 6, rr.top(), rr.width() - 12, rr.height())
+        peak = max(self.timeline.sim.minute_total_w) if self.timeline.sim.minute_total_w else 0.0
+        p.setPen(QColor(220, 220, 230))
+        p.setFont(self.timeline.info_font)
+        metrics = QFontMetrics(self.timeline.info_font)
+        line_h = metrics.height()
+        text_rect = QRect(info.left(), info.top(), info.width(), info.height())
+        if self.timeline.settings.show_amps:
+            amps = peak / max(self.timeline.settings.mains_voltage, 0.1)
+            total_h = line_h * 2
+            start_y = text_rect.top() + (text_rect.height() - total_h) // 2
+            peak_w_text = f"Peak: {peak:.0f} W"
+            peak_a_text = f"Peak: {amps:.1f} A"
+            p.drawText(
+                QRect(text_rect.left(), start_y, text_rect.width(), line_h),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                peak_w_text,
+            )
+            p.drawText(
+                QRect(text_rect.left(), start_y + line_h, text_rect.width(), line_h),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                peak_a_text,
+            )
+        else:
+            peak_text = f"Peak: {peak:.0f} W"
+            p.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, peak_text)
+
+
 # =========================
 # Main window UI
 # =========================
@@ -2406,8 +2462,18 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         root_layout = QVBoxLayout(root)
 
+        timeline_row = QWidget()
+        timeline_layout = QHBoxLayout(timeline_row)
+        timeline_layout.setContentsMargins(0, 0, 0, 0)
+        timeline_layout.setSpacing(12)
+
         self.timeline = TimelineWidget(parent=self)
-        root_layout.addWidget(self.timeline, stretch=1)
+        self.timeline_totals = TimelineTotalsPanel(self.timeline, parent=self)
+        self.timeline.set_info_panel(self.timeline_totals)
+
+        timeline_layout.addWidget(self.timeline, stretch=1)
+        timeline_layout.addWidget(self.timeline_totals, stretch=0)
+        root_layout.addWidget(timeline_row, stretch=1)
         self._build_timeline_controls()
 
         self.summary = QLabel("")
@@ -2719,6 +2785,7 @@ class MainWindow(QMainWindow):
     def recompute(self):
         sim = simulate_day(self.project, self.settings_model, self.current_date)
         self.timeline.set_data(self.project, self.settings_model, sim, day=self.current_date)
+        self.timeline_totals.sync_from_timeline()
         self._apply_zoom()
         self._update_summary(sim)
 
@@ -3034,6 +3101,7 @@ class MainWindow(QMainWindow):
     def _toggle_timeline_totals(self, enabled: bool):
         self.settings_model.show_timeline_totals = enabled
         self.settings_model.to_qsettings(self.qs)
+        self.timeline_totals.sync_from_timeline()
         self.recompute()
 
 
