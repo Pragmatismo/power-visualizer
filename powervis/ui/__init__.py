@@ -42,6 +42,7 @@ from powervis.simulate import (
     SimTotals,
     tariff_rate_for_minute,
     tariff_segments,
+    build_device_minute_power,
     build_tariff_minute_rates,
     format_tariff_rate,
     tariff_price_summary,
@@ -1454,6 +1455,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.reference_date: Optional[datetime.date] = None
         self.visible_device_indices: List[int] = []
         self.row_items: List[Dict[str, object]] = []
+        self._total_power_by_day: Optional[List[List[float]]] = None
 
         # layout constants
         self.left_label_w = 220
@@ -1515,6 +1517,7 @@ class TimelineWidget(QAbstractScrollArea):
         self.settings = settings
         self.sim = sim
         self.reference_date = day
+        self._total_power_by_day = None
         self._update_visible_devices()
         self._build_row_items()
         self._update_left_label_width()
@@ -1883,6 +1886,7 @@ class TimelineWidget(QAbstractScrollArea):
             end = start + 1
         self.timeline_start_min = start
         self.timeline_end_min = end
+        self._total_power_by_day = None
         self._update_axis_layout()
         self._update_scrollbar()
         self._refresh_viewport()
@@ -2285,14 +2289,25 @@ class TimelineWidget(QAbstractScrollArea):
         p.drawText(lr, Qt.AlignCenter, "Total Power")
 
         # draw total power graph
-        total_w = self.sim.minute_total_w
-        peak = max(total_w) if total_w else 0.0
+        peak = 0.0
+        day_count = self._day_count()
+        if self.reference_date:
+            self._ensure_total_power_cache(day_count)
+            if self._total_power_by_day:
+                peak = max((max(day) for day in self._total_power_by_day if day), default=0.0)
+        if peak <= 0.0:
+            total_w = self.sim.minute_total_w
+            peak = max(total_w) if total_w else 0.0
         graph_h = max(1, rr.height() - 16)
         base_y = rr.bottom() - 8
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(120, 200, 140, 200))
-        for day_offset in range(self._day_count()):
+        for day_offset in range(day_count):
             day_start = day_offset * MINUTES_PER_DAY
+            if self._total_power_by_day:
+                total_w = self._total_power_by_day[day_offset]
+            else:
+                total_w = self.sim.minute_total_w
             for minute in range(MINUTES_PER_DAY):
                 timeline_minute = day_start + minute
                 if timeline_minute >= self.timeline_end_min:
@@ -2312,6 +2327,18 @@ class TimelineWidget(QAbstractScrollArea):
         p.drawRect(rr)
 
         return
+
+    def _ensure_total_power_cache(self, day_count: int) -> None:
+        if not (self.project and self.reference_date):
+            self._total_power_by_day = None
+            return
+        if self._total_power_by_day is not None and len(self._total_power_by_day) == day_count:
+            return
+        self._total_power_by_day = []
+        for day_offset in range(day_count):
+            day = self.reference_date + datetime.timedelta(days=day_offset)
+            _dev_w, minute_total_w = build_device_minute_power(self.project, day)
+            self._total_power_by_day.append(minute_total_w)
 
     def _draw_block(
         self,
