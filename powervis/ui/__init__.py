@@ -1659,6 +1659,16 @@ class TimelineWidget(QAbstractScrollArea):
                 day = self.reference_date + datetime.timedelta(days=day_offset)
 
             # base rate visualization
+            tl = self._timeline_rect()
+            offset = self._scroll_offset()
+
+            def minute_to_xf(minute: int) -> float:
+                return (
+                    tl.left()
+                    + (minute - self.timeline_start_min) * self.pixels_per_minute
+                    - offset
+                )
+
             for hour in range(24):
                 m0 = day_start + hour * 60
                 m1 = day_start + (hour + 1) * 60
@@ -1671,10 +1681,9 @@ class TimelineWidget(QAbstractScrollArea):
                     clamp(30 + int(60 * r), 30, 120),
                     clamp(90 + base, 90, 220),
                 )
-                x0 = self._minute_to_x(m0)
-                x1 = self._minute_to_x(m1)
-                p.setBrush(col)
-                p.drawRect(QRect(x0, tr.top(), x1 - x0, tr.height()))
+                x0 = minute_to_xf(m0)
+                x1 = minute_to_xf(m1)
+                p.fillRect(QRectF(x0, tr.top(), x1 - x0, tr.height()), col)
 
             for start_min, end_min, rate in tariff_segments(self.settings, day):
                 x0 = self._minute_to_x(day_start + start_min)
