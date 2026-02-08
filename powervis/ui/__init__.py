@@ -1324,6 +1324,7 @@ class HitTest:
     kind: str = HitKind.NONE
     device_index: int = -1
     item_index: int = -1
+    day_offset: int = 0
     # for intervals/events: original start/end for drag operations
     anchor_minute: int = 0
 
@@ -1573,6 +1574,83 @@ class TimelineWidget(QAbstractScrollArea):
     def _day_count(self) -> int:
         total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
         return max(1, math.ceil(total_minutes / MINUTES_PER_DAY))
+
+    def _day_key(self, day_offset: int) -> Optional[str]:
+        if not self.reference_date:
+            return None
+        day = self.reference_date + datetime.timedelta(days=day_offset)
+        return day.isoformat()
+
+    def _intervals_for_day(self, dev: Device, day_offset: int) -> List[Interval]:
+        key = self._day_key(day_offset)
+        if key and key in dev.day_intervals:
+            return dev.day_intervals[key]
+        return dev.intervals
+
+    def _events_for_day(self, dev: Device, day_offset: int) -> List[Event]:
+        key = self._day_key(day_offset)
+        if key and key in dev.day_events:
+            return dev.day_events[key]
+        return dev.events
+
+    def _ensure_day_intervals(self, dev: Device, day_offset: int) -> Tuple[List[Interval], Optional[str]]:
+        key = self._day_key(day_offset)
+        if not key:
+            return dev.intervals, None
+        if key not in dev.day_intervals:
+            dev.day_intervals[key] = [Interval(iv.start_min, iv.end_min).normalized() for iv in dev.intervals]
+        return dev.day_intervals[key], key
+
+    def _ensure_day_events(self, dev: Device, day_offset: int) -> Tuple[List[Event], Optional[str]]:
+        key = self._day_key(day_offset)
+        if not key:
+            return dev.events, None
+        if key not in dev.day_events:
+            dev.day_events[key] = [Event(ev.start_min, ev.duration_min, ev.energy_wh).normalized() for ev in dev.events]
+        return dev.day_events[key], key
+
+    def _interval_signature(self, interval: Interval) -> Tuple[int, int]:
+        ivn = interval.normalized()
+        return ivn.start_min, ivn.end_min
+
+    def _event_signature(self, event: Event) -> Tuple[int, int]:
+        evn = event.normalized()
+        return evn.start_min, evn.duration_min
+
+    def _remove_matching_interval(self, dev: Device, signature: Tuple[int, int]) -> None:
+        dev.intervals = [iv for iv in dev.intervals if self._interval_signature(iv) != signature]
+        for day_key, intervals in list(dev.day_intervals.items()):
+            dev.day_intervals[day_key] = [
+                iv for iv in intervals if self._interval_signature(iv) != signature
+            ]
+            if not dev.day_intervals[day_key]:
+                dev.day_intervals.pop(day_key, None)
+
+    def _remove_matching_event(self, dev: Device, signature: Tuple[int, int]) -> None:
+        dev.events = [ev for ev in dev.events if self._event_signature(ev) != signature]
+        for day_key, events in list(dev.day_events.items()):
+            dev.day_events[day_key] = [
+                ev for ev in events if self._event_signature(ev) != signature
+            ]
+            if not dev.day_events[day_key]:
+                dev.day_events.pop(day_key, None)
+
+    def _append_interval_unique(self, intervals: List[Interval], interval: Interval) -> None:
+        signature = self._interval_signature(interval)
+        if any(self._interval_signature(iv) == signature for iv in intervals):
+            return
+        intervals.append(interval)
+
+    def _append_event_unique(self, events: List[Event], event: Event) -> None:
+        signature = self._event_signature(event)
+        if any(self._event_signature(ev) == signature for ev in events):
+            return
+        events.append(event)
+
+    def _day_bounds(self, day_offset: int) -> Tuple[int, int]:
+        day_start = day_offset * MINUTES_PER_DAY
+        day_end = min(self.timeline_end_min, (day_offset + 1) * MINUTES_PER_DAY)
+        return day_start, day_end
 
     def _visible_minutes(self) -> int:
         total_minutes = max(1, self.timeline_end_min - self.timeline_start_min)
@@ -1875,15 +1953,17 @@ class TimelineWidget(QAbstractScrollArea):
             )
 
         elif dev.dtype == DeviceType.SCHEDULED:
-            for j, iv in enumerate(dev.intervals):
-                ivn = iv.normalized()
-                hover = (
-                    self.hover_hit.kind.startswith("interval")
-                    and self.hover_hit.device_index == dev_index
-                    and self.hover_hit.item_index == j
-                )
-                duration_text = format_duration_hhmm(ivn.end_min - ivn.start_min)
-                for day_offset in range(self._day_count()):
+            for day_offset in range(self._day_count()):
+                intervals = self._intervals_for_day(dev, day_offset)
+                for j, iv in enumerate(intervals):
+                    ivn = iv.normalized()
+                    hover = (
+                        self.hover_hit.kind.startswith("interval")
+                        and self.hover_hit.device_index == dev_index
+                        and self.hover_hit.item_index == j
+                        and self.hover_hit.day_offset == day_offset
+                    )
+                    duration_text = format_duration_hhmm(ivn.end_min - ivn.start_min)
                     start_min = day_offset * MINUTES_PER_DAY + ivn.start_min
                     end_min = day_offset * MINUTES_PER_DAY + ivn.end_min
                     if start_min >= self.timeline_end_min:
@@ -1894,19 +1974,21 @@ class TimelineWidget(QAbstractScrollArea):
                         start_min,
                         min(end_min, self.timeline_end_min),
                         QColor(100, 170, 240, 190),
-                        hover=hover and day_offset == 0,
+                        hover=hover,
                         label_text=duration_text,
                     )
 
         elif dev.dtype == DeviceType.EVENTS:
-            for j, ev in enumerate(dev.events):
-                evn = ev.normalized()
-                hover = (
-                    self.hover_hit.kind == HitKind.EVENT_BODY
-                    and self.hover_hit.device_index == dev_index
-                    and self.hover_hit.item_index == j
-                )
-                for day_offset in range(self._day_count()):
+            for day_offset in range(self._day_count()):
+                events = self._events_for_day(dev, day_offset)
+                for j, ev in enumerate(events):
+                    evn = ev.normalized()
+                    hover = (
+                        self.hover_hit.kind == HitKind.EVENT_BODY
+                        and self.hover_hit.device_index == dev_index
+                        and self.hover_hit.item_index == j
+                        and self.hover_hit.day_offset == day_offset
+                    )
                     start_min = day_offset * MINUTES_PER_DAY + evn.start_min
                     if start_min >= self.timeline_end_min:
                         continue
@@ -1916,7 +1998,7 @@ class TimelineWidget(QAbstractScrollArea):
                         start_min,
                         evn.duration_min,
                         QColor(240, 170, 90, 200),
-                        hover=hover and day_offset == 0,
+                        hover=hover,
                     )
 
         # row border
@@ -2060,13 +2142,27 @@ class TimelineWidget(QAbstractScrollArea):
             hit = self._hit_test(pos)
             if hit.kind == HitKind.EVENT_BODY:
                 dev = self.project.devices[hit.device_index]
-                if 0 <= hit.item_index < len(dev.events):
-                    dev.events.pop(hit.item_index)
+                events = self._events_for_day(dev, hit.day_offset)
+                if 0 <= hit.item_index < len(events):
+                    signature = self._event_signature(events[hit.item_index])
+                    if self.settings and self.settings.affect_every_day:
+                        self._remove_matching_event(dev, signature)
+                    else:
+                        events, _ = self._ensure_day_events(dev, hit.day_offset)
+                        if 0 <= hit.item_index < len(events):
+                            events.pop(hit.item_index)
                     self._trigger_recompute()  # main window call
             elif hit.kind.startswith("interval"):
                 dev = self.project.devices[hit.device_index]
-                if 0 <= hit.item_index < len(dev.intervals):
-                    dev.intervals.pop(hit.item_index)
+                intervals = self._intervals_for_day(dev, hit.day_offset)
+                if 0 <= hit.item_index < len(intervals):
+                    signature = self._interval_signature(intervals[hit.item_index])
+                    if self.settings and self.settings.affect_every_day:
+                        self._remove_matching_interval(dev, signature)
+                    else:
+                        intervals, _ = self._ensure_day_intervals(dev, hit.day_offset)
+                        if 0 <= hit.item_index < len(intervals):
+                            intervals.pop(hit.item_index)
                     self._trigger_recompute()
             return
 
@@ -2083,14 +2179,38 @@ class TimelineWidget(QAbstractScrollArea):
             if dev_index != -1:
                 dev = self.project.devices[dev_index]
                 m = self._x_to_minute(pos.x())
+                day_offset = m // MINUTES_PER_DAY
+                day_start, day_end = self._day_bounds(day_offset)
+                minute_in_day = m - day_start
+                if minute_in_day < 0 or m >= day_end:
+                    return
                 if dev.dtype == DeviceType.SCHEDULED:
                     duration = max(1, dev.default_duration_min)
-                    dev.intervals.append(Interval(m, min(MINUTES_PER_DAY, m + duration)).normalized())
+                    end_in_day = min(minute_in_day + duration, MINUTES_PER_DAY, day_end - day_start)
+                    if end_in_day <= minute_in_day:
+                        return
+                    new_interval = Interval(minute_in_day, end_in_day).normalized()
+                    if self.settings and self.settings.affect_every_day:
+                        self._append_interval_unique(dev.intervals, new_interval)
+                        for intervals in dev.day_intervals.values():
+                            self._append_interval_unique(intervals, new_interval)
+                    else:
+                        intervals, _ = self._ensure_day_intervals(dev, day_offset)
+                        self._append_interval_unique(intervals, new_interval)
                     self._trigger_recompute()
                     return
                 elif dev.dtype == DeviceType.EVENTS:
                     duration = max(1, dev.default_duration_min)
-                    dev.events.append(Event(m, duration, None).normalized())
+                    end_in_day = min(minute_in_day + duration, MINUTES_PER_DAY, day_end - day_start)
+                    duration = max(1, end_in_day - minute_in_day)
+                    new_event = Event(minute_in_day, duration, None).normalized()
+                    if self.settings and self.settings.affect_every_day:
+                        self._append_event_unique(dev.events, new_event)
+                        for events in dev.day_events.values():
+                            self._append_event_unique(events, new_event)
+                    else:
+                        events, _ = self._ensure_day_events(dev, day_offset)
+                        self._append_event_unique(events, new_event)
                     self._trigger_recompute()
                     return
                 # always-on: do nothing
@@ -2196,27 +2316,55 @@ class TimelineWidget(QAbstractScrollArea):
             return abs(x - target) <= px
 
         if dev.dtype == DeviceType.SCHEDULED:
-            for j, iv in enumerate(dev.intervals):
-                ivn = iv.normalized()
-                x0 = self._minute_to_x(ivn.start_min)
-                x1 = self._minute_to_x(ivn.end_min)
-                rect = QRect(x0, rr.top() + 8, max(2, x1 - x0), rr.height() - 16)
-                if rect.contains(pos):
-                    # edges?
-                    if near(pos.x(), rect.left()):
-                        return HitTest(HitKind.INTERVAL_LEFT, dev_index, j, self._x_to_minute(pos.x()))
-                    if near(pos.x(), rect.right()):
-                        return HitTest(HitKind.INTERVAL_RIGHT, dev_index, j, self._x_to_minute(pos.x()))
-                    return HitTest(HitKind.INTERVAL_BODY, dev_index, j, self._x_to_minute(pos.x()))
+            for day_offset in range(self._day_count()):
+                intervals = self._intervals_for_day(dev, day_offset)
+                for j, iv in enumerate(intervals):
+                    ivn = iv.normalized()
+                    x0 = self._minute_to_x(day_offset * MINUTES_PER_DAY + ivn.start_min)
+                    x1 = self._minute_to_x(day_offset * MINUTES_PER_DAY + ivn.end_min)
+                    rect = QRect(x0, rr.top() + 8, max(2, x1 - x0), rr.height() - 16)
+                    if rect.contains(pos):
+                        # edges?
+                        if near(pos.x(), rect.left()):
+                            return HitTest(
+                                HitKind.INTERVAL_LEFT,
+                                dev_index,
+                                j,
+                                day_offset,
+                                self._x_to_minute(pos.x()),
+                            )
+                        if near(pos.x(), rect.right()):
+                            return HitTest(
+                                HitKind.INTERVAL_RIGHT,
+                                dev_index,
+                                j,
+                                day_offset,
+                                self._x_to_minute(pos.x()),
+                            )
+                        return HitTest(
+                            HitKind.INTERVAL_BODY,
+                            dev_index,
+                            j,
+                            day_offset,
+                            self._x_to_minute(pos.x()),
+                        )
 
         if dev.dtype == DeviceType.EVENTS:
-            for j, ev in enumerate(dev.events):
-                evn = ev.normalized()
-                x0 = self._minute_to_x(evn.start_min)
-                x1 = self._minute_to_x(evn.start_min + evn.duration_min)
-                rect = QRect(x0, rr.top() + 10, max(3, x1 - x0), rr.height() - 20)
-                if rect.contains(pos):
-                    return HitTest(HitKind.EVENT_BODY, dev_index, j, self._x_to_minute(pos.x()))
+            for day_offset in range(self._day_count()):
+                events = self._events_for_day(dev, day_offset)
+                for j, ev in enumerate(events):
+                    evn = ev.normalized()
+                    x0 = self._minute_to_x(day_offset * MINUTES_PER_DAY + evn.start_min)
+                    x1 = self._minute_to_x(day_offset * MINUTES_PER_DAY + evn.start_min + evn.duration_min)
+                    rect = QRect(x0, rr.top() + 10, max(3, x1 - x0), rr.height() - 20)
+                    if rect.contains(pos):
+                        return HitTest(
+                            HitKind.EVENT_BODY,
+                            dev_index,
+                            j,
+                            day_offset,
+                            self._x_to_minute(pos.x()),
+                        )
 
         if dev.dtype == DeviceType.ALWAYS:
             # optionally allow click to do nothing
@@ -2227,11 +2375,13 @@ class TimelineWidget(QAbstractScrollArea):
     def _snapshot_item(self, hit: HitTest):
         dev = self.project.devices[hit.device_index]
         if hit.kind.startswith("interval"):
-            iv = dev.intervals[hit.item_index].normalized()
-            return ("interval", iv.start_min, iv.end_min)
+            intervals = self._intervals_for_day(dev, hit.day_offset)
+            iv = intervals[hit.item_index].normalized()
+            return ("interval", hit.day_offset, iv.start_min, iv.end_min)
         if hit.kind == HitKind.EVENT_BODY:
-            ev = dev.events[hit.item_index].normalized()
-            return ("event", ev.start_min, ev.duration_min, ev.energy_wh)
+            events = self._events_for_day(dev, hit.day_offset)
+            ev = events[hit.item_index].normalized()
+            return ("event", hit.day_offset, ev.start_min, ev.duration_min, ev.energy_wh)
         return None
 
     def _handle_drag(self, pos: QPoint):
@@ -2244,7 +2394,8 @@ class TimelineWidget(QAbstractScrollArea):
         delta = m_now - self.drag_start_min
 
         if self.drag_original[0] == "interval":
-            _, s0, e0 = self.drag_original
+            _, day_offset, s0, e0 = self.drag_original
+            intervals = self._intervals_for_day(dev, day_offset)
             if hit.kind == HitKind.INTERVAL_BODY:
                 s = clamp(s0 + delta, 0, MINUTES_PER_DAY - 1)
                 length = e0 - s0
@@ -2252,24 +2403,25 @@ class TimelineWidget(QAbstractScrollArea):
                 # if clamped at end, pull start back
                 if e - s < length:
                     s = max(0, e - length)
-                dev.intervals[hit.item_index] = Interval(s, e).normalized()
+                intervals[hit.item_index] = Interval(s, e).normalized()
 
             elif hit.kind == HitKind.INTERVAL_LEFT:
                 s = clamp(s0 + delta, 0, e0 - 1)
-                dev.intervals[hit.item_index] = Interval(s, e0).normalized()
+                intervals[hit.item_index] = Interval(s, e0).normalized()
 
             elif hit.kind == HitKind.INTERVAL_RIGHT:
                 e = clamp(e0 + delta, s0 + 1, MINUTES_PER_DAY)
-                dev.intervals[hit.item_index] = Interval(s0, e).normalized()
+                intervals[hit.item_index] = Interval(s0, e).normalized()
 
         elif self.drag_original[0] == "event":
-            _, s0, dur, ewh = self.drag_original
+            _, day_offset, s0, dur, ewh = self.drag_original
+            events = self._events_for_day(dev, day_offset)
             if hit.kind == HitKind.EVENT_BODY:
                 s = clamp(s0 + delta, 0, MINUTES_PER_DAY - 1)
                 # enforce split at midnight by clamping duration
                 if s + dur > MINUTES_PER_DAY:
                     s = MINUTES_PER_DAY - dur
-                dev.events[hit.item_index] = Event(s, dur, ewh).normalized()
+                events[hit.item_index] = Event(s, dur, ewh).normalized()
 
         self._refresh_viewport()
 
@@ -2875,6 +3027,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(6)
 
+        self.affect_every_day_checkbox = QCheckBox("Affect Every Day")
+        self.affect_every_day_checkbox.setChecked(self.settings_model.affect_every_day)
+        self.affect_every_day_checkbox.setStyleSheet("QCheckBox { color: #d6d6de; }")
+        self.affect_every_day_checkbox.toggled.connect(self._toggle_affect_every_day)
+
         self.prev_month_btn = QToolButton()
         self.prev_month_btn.setText("⏮")
         self.prev_month_btn.setToolTip("Jump to first day of previous month")
@@ -2915,6 +3072,8 @@ class MainWindow(QMainWindow):
         self.zoom_label = QLabel("")
         self.zoom_label.setStyleSheet("QLabel { color: #d6d6de; }")
 
+        layout.addWidget(self.affect_every_day_checkbox)
+        layout.addSpacing(8)
         layout.addWidget(self.prev_month_btn)
         layout.addWidget(self.prev_day_btn)
         layout.addWidget(self.date_button)
@@ -3176,6 +3335,11 @@ class MainWindow(QMainWindow):
         self.settings_model.to_qsettings(self.qs)
         self.timeline_totals.sync_from_timeline()
         self.recompute()
+
+    def _toggle_affect_every_day(self, enabled: bool):
+        self.settings_model.affect_every_day = enabled
+        self.settings_model.to_qsettings(self.qs)
+        self.timeline._refresh_viewport()
 
     def _toggle_sort_by_category(self, enabled: bool):
         self.settings_model.sort_by_category = enabled

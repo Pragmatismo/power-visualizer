@@ -267,7 +267,9 @@ def build_device_minute_power(
     project: Project,
     day: Optional[Union[datetime.date, int]] = None,
 ) -> Tuple[List[List[float]], List[float]]:
-    _ = day
+    day_key = None
+    if isinstance(day, datetime.date):
+        day_key = day.isoformat()
     minute_total_w = [0.0] * MINUTES_PER_DAY
     dev_w = [ [0.0] * MINUTES_PER_DAY for _ in project.devices ]
 
@@ -282,14 +284,20 @@ def build_device_minute_power(
                 dev_w[i][m] += base_power_w
 
         elif dev.dtype == DeviceType.SCHEDULED:
-            for iv in dev.intervals:
+            intervals = dev.intervals
+            if day_key and day_key in dev.day_intervals:
+                intervals = dev.day_intervals[day_key]
+            for iv in intervals:
                 ivn = iv.normalized()
                 for m in range(ivn.start_min, ivn.end_min):
                     dev_w[i][m] += base_power_w
 
         elif dev.dtype == DeviceType.EVENTS:
             # Each event either uses base_power_w for duration or fixed energy spread over its duration
-            for ev in dev.events:
+            events = dev.events
+            if day_key and day_key in dev.day_events:
+                events = dev.day_events[day_key]
+            for ev in events:
                 evn = ev.normalized()
                 if evn.energy_wh is None:
                     for m in range(evn.start_min, evn.start_min + evn.duration_min):
