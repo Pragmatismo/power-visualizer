@@ -231,6 +231,7 @@ class SettingsModel:
     show_total_power: bool = True
     show_timeline_totals: bool = True
     sort_by_category: bool = False
+    show_day_night: bool = True
     simulation_length_key: str = "1_week"
     affect_every_day: bool = True
     location_label: str = "Custom"
@@ -265,6 +266,7 @@ class SettingsModel:
             show_total_power=self.show_total_power,
             show_timeline_totals=self.show_timeline_totals,
             sort_by_category=self.sort_by_category,
+            show_day_night=self.show_day_night,
             simulation_length_key=self.simulation_length_key,
             affect_every_day=self.affect_every_day,
             location_label=self.location_label,
@@ -294,6 +296,7 @@ class SettingsModel:
         qs.setValue("show_total_power", self.show_total_power)
         qs.setValue("show_timeline_totals", self.show_timeline_totals)
         qs.setValue("sort_by_category", self.sort_by_category)
+        qs.setValue("show_day_night", self.show_day_night)
         qs.setValue("simulation_length_key", self.simulation_length_key)
         qs.setValue("affect_every_day", self.affect_every_day)
         qs.setValue("location_label", self.location_label)
@@ -338,6 +341,9 @@ class SettingsModel:
         )
         sm.sort_by_category = (
             str(qs.value("sort_by_category", sm.sort_by_category)).lower() == "true"
+        )
+        sm.show_day_night = (
+            str(qs.value("show_day_night", sm.show_day_night)).lower() == "true"
         )
         sm.simulation_length_key = str(
             qs.value("simulation_length_key", sm.simulation_length_key)
