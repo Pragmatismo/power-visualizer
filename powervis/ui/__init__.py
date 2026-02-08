@@ -2754,18 +2754,19 @@ class TimelineTotalsPanel(QWidget):
     def _header_height(self) -> int:
         if not self._info_panel_visible():
             return 0
-        return self._selector_height() + 12
+        return 0
 
     def _position_period_selector(self) -> None:
         if not self._info_panel_visible():
             return
-        content_top = self.timeline._axis_top() + self.timeline.axis_h
         selector_height = self._selector_height()
         if selector_height <= 0:
             return
+        content_top = self.timeline._axis_top()
+        selector_top = max(6, content_top - selector_height - 6)
         self.period_selector.setGeometry(
             6,
-            content_top + 6,
+            selector_top,
             max(0, self.width() - 12),
             selector_height,
         )
